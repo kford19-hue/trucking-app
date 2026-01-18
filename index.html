@@ -178,6 +178,15 @@
         </label>
       </div>
 
+      <div class="row two">
+  <label>Customers / Brokers (one per line)
+    <textarea id="s_customers"></textarea>
+  </label>
+  <label>Consignees (one per line)
+    <textarea id="s_consignees"></textarea>
+  </label>
+</div>
+
       <div class="row three">
         <label>Loaded Miles
           <input id="t_loaded_miles" type="number" min="0" step="1" placeholder="0" />
@@ -515,6 +524,8 @@ const defaults = {
       "Household expenses","Groceries","Entertainment","Mortgage/Rent",
       "Car note","Utilities","Phone/Internet","Insurance","Gas/Transportation",
       "Personal","Savings","Medical"
+    customers: ["Select…","CH Robinson","TQL","JB Hunt"],
+    consignees: ["Select…","Walmart DC","Amazon FC","Costco DC"],
     ]
   },
   rates: {
@@ -609,6 +620,8 @@ function loadTripDropdowns(){
   fillSelect($("t_tire"), state.lists.tires);
   fillSelect($("t_truck"), state.lists.trucks);
   fillSelect($("t_trailer"), state.lists.trailers);
+  fillSelect($("t_customer"), state.lists.customers);
+  fillSelect($("t_consignee"), state.lists.consignees);
 }
 loadTripDropdowns();
 
@@ -1107,6 +1120,8 @@ $("btn_save_lists").addEventListener("click", ()=>{
   state.lists.tires     = ensureSelect(linesToList($("s_tires").value));
   state.lists.trucks    = ensureSelect(linesToList($("s_trucks").value));
   state.lists.trailers  = ensureSelect(linesToList($("s_trailers").value));
+  state.lists.customers  = ensureSelect(linesToList($("s_customers").value));
+  state.lists.consignees = ensureSelect(linesToList($("s_consignees").value));
   saveState();
   loadTripDropdowns();
   toast("Lists saved 💾");
@@ -1169,6 +1184,8 @@ function escapeHtml(s){
 $("t_date").value = todayISO();
 renderTrips();
 loadSettingsUI();
+  $("s_customers").value  = state.lists.customers.join("\n");
+  $("s_consignees").value = state.lists.consignees.join("\n");
 loadBudgetUI();
 refreshDashboard();
 </script>
