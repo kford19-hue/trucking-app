@@ -105,6 +105,7 @@
       background:rgba(0,0,0,.72); border:1px solid var(--line);
       padding:10px 12px; border-radius:999px; color:var(--text);
       font-size:13px; max-width:92vw; backdrop-filter: blur(10px);
+      pointer-events:none; /* prevents it blocking taps */
     }
   </style>
 </head>
@@ -496,7 +497,7 @@
 
       <div class="hr"></div>
       <button type="button" class="bad" id="btn_nuke">🧨 Delete ALL Data (Danger)</button>
-      <div class="small">This wipes trips, budget, goals. There is no undo.</div>
+      <div class="small">This wipes trips, budget, goals. There is no undo. Humans requested “idiot proof” and then asked for a nuke button. So here we are.</div>
     </div>
   </section>
 </main>
@@ -504,6 +505,23 @@
 <div id="toast" class="toast hide">Saved.</div>
 
 <script>
+/* =========================
+   Compatibility fixes (Safari-safe)
+========================= */
+if (typeof structuredClone !== "function") {
+  window.structuredClone = (obj) => JSON.parse(JSON.stringify(obj));
+}
+if (!window.crypto) window.crypto = {};
+if (typeof window.crypto.randomUUID !== "function") {
+  window.crypto.randomUUID = () => {
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0;
+      const v = c === "x" ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+  };
+}
+
 /* =========================
    Storage + Defaults
 ========================= */
@@ -570,12 +588,13 @@ let state = loadState();
 const $ = (id)=> document.getElementById(id);
 function toast(msg){
   const t = $("toast");
+  if(!t) return;
   t.textContent = msg;
   t.classList.remove("hide");
   setTimeout(()=> t.classList.add("hide"), 1700);
 }
 function fillSelect(selectEl, arr){
-  if(!selectEl) return; // ✅ prevents JS crash
+  if(!selectEl) return; // don't crash if element missing
   selectEl.innerHTML = "";
   (arr || []).forEach(v=>{
     const opt = document.createElement("option");
@@ -620,7 +639,7 @@ function loadTripDropdowns(){
   fillSelect($("t_tire"), state.lists.tires);
   fillSelect($("t_truck"), state.lists.trucks);
   fillSelect($("t_trailer"), state.lists.trailers);
-  // NOTE: customers/consignees are textareas in this version, not selects.
+  // customers/consignees are textareas in this UI
 }
 loadTripDropdowns();
 
@@ -672,9 +691,8 @@ function readTripForm(){
     pickupAddr: $("t_pickup_addr").value.trim(),
     delivery: $("t_delivery").value,
     deliveryAddr: $("t_delivery_addr").value.trim(),
-    // capture the textarea contents too (optional)
-    customers: $("s_customers").value.trim(),
-    consignees: $("s_consignees").value.trim(),
+    customers: ($("s_customers")?.value || "").trim(),
+    consignees: ($("s_consignees")?.value || "").trim(),
     loadedMiles: loaded,
     deadheadMiles: deadhead,
     totalMiles: miles,
@@ -711,8 +729,8 @@ $("btn_clear").addEventListener("click", ()=>{
   ["t_ref","t_pickup_addr","t_delivery_addr","t_loaded_miles","t_deadhead_miles","t_revenue",
    "t_fuel_gal","t_fuel_cpg","t_tolls","t_other","t_res_tires","t_res_maint","t_res_plates","t_res_ifta","t_res_tax","t_notes"
   ].forEach(id=> $(id).value="");
-  $("s_customers").value="";
-  $("s_consignees").value="";
+  if($("s_customers")) $("s_customers").value="";
+  if($("s_consignees")) $("s_consignees").value="";
   $("t_date").value = todayISO();
   updateTripKPIs({totalMiles:0,fuelCost:0,totals:{mpg:0,net:0}});
   toast("Cleared 🧽");
@@ -743,8 +761,7 @@ function renderTrips(){
   const filtered = state.trips.filter(t=>{
     if(!q) return true;
     const blob = [
-      t.company,t.shipper,t.pickup,t.delivery,t.ref,t.notes,t.truck,t.trailer,
-      t.customers, t.consignees
+      t.company,t.shipper,t.pickup,t.delivery,t.ref,t.notes,t.truck,t.trailer,t.customers,t.consignees
     ].join(" ").toLowerCase();
     return blob.includes(q);
   });
@@ -822,8 +839,8 @@ function loadTripToForm(t){
   $("t_pickup_addr").value = t.pickupAddr||"";
   $("t_delivery").value = t.delivery;
   $("t_delivery_addr").value = t.deliveryAddr||"";
-  $("s_customers").value = t.customers || "";
-  $("s_consignees").value = t.consignees || "";
+  if($("s_customers")) $("s_customers").value = t.customers || "";
+  if($("s_consignees")) $("s_consignees").value = t.consignees || "";
   $("t_loaded_miles").value = t.loadedMiles;
   $("t_deadhead_miles").value = t.deadheadMiles;
   $("t_revenue").value = t.revenue;
@@ -1108,8 +1125,8 @@ function loadSettingsUI(){
   $("r_tax_pct").value = state.rates.taxPctRevenue;
   $("r_mpg").value = state.rates.targetMPG;
 
-  $("s_customers").value  = state.lists.customers.join("\n");
-  $("s_consignees").value = state.lists.consignees.join("\n");
+  if($("s_customers")) $("s_customers").value  = state.lists.customers.join("\n");
+  if($("s_consignees")) $("s_consignees").value = state.lists.consignees.join("\n");
 }
 
 function linesToList(text){
@@ -1123,8 +1140,8 @@ $("btn_save_lists").addEventListener("click", ()=>{
   state.lists.tires     = ensureSelect(linesToList($("s_tires").value));
   state.lists.trucks    = ensureSelect(linesToList($("s_trucks").value));
   state.lists.trailers  = ensureSelect(linesToList($("s_trailers").value));
-  state.lists.customers  = ensureSelect(linesToList($("s_customers").value));
-  state.lists.consignees = ensureSelect(linesToList($("s_consignees").value));
+  state.lists.customers  = ensureSelect(linesToList(($("s_customers")?.value)||""));
+  state.lists.consignees = ensureSelect(linesToList(($("s_consignees")?.value)||""));
   saveState();
   loadTripDropdowns();
   toast("Lists saved 💾");
@@ -1192,4 +1209,3 @@ refreshDashboard();
 </script>
 </body>
 </html>
-
