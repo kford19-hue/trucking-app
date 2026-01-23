@@ -191,62 +191,83 @@
     /* =========================
        PRINT: invoice-only output
     ========================= */
-    @media print {
-      @page { margin: 14mm; }
+@media print {
+  @page { margin: 12mm; }
 
-      html, body {
-        background:#fff !important;
-        color:#111 !important;
-        height:auto !important;
-      }
+  html, body {
+    background:#fff !important;
+    color:#111 !important;
+    height:auto !important;
+  }
 
-      /* Hide the entire app UI */
-      header, main, #toast {
-        display:none !important;
-      }
+  /* KEY FIX: don't "display:none" main/header because invoicePreview is inside main.
+     Instead, hide everything via visibility, then reveal only #invoicePreview. */
+  body * {
+    visibility: hidden !important;
+  }
 
-      /* ONLY show the invoice preview area */
-      #invoicePreview {
-        display:block !important;
-        position: static !important;
-        width: 100% !important;
-        margin: 0 !important;
-        padding: 0 !important;
+  /* If the invoices tab section was hidden (.hide), force it to exist for print */
+  #tab-invoices, #tab-invoices.hide {
+    display: block !important;
+  }
 
-        border: none !important;
-        border-radius: 0 !important;
-        box-shadow: none !important;
+  /* Reveal invoicePreview */
+  #invoicePreview, #invoicePreview * {
+    visibility: visible !important;
+  }
 
-        background: #fff !important;
-        color:#111 !important;
-        overflow: visible !important;
-      }
+  /* Position invoice at top-left for clean printing */
+  #invoicePreview {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
 
-      /* Remove the in-app preview padding so it prints flush */
-      .invoicePaper{
-        border:none !important;
-        border-radius:0 !important;
-        box-shadow:none !important;
-        padding:0 !important;
-        margin:0 !important;
-        background:#fff !important;
-        overflow: visible !important;
-      }
+    margin: 0 !important;
+    padding: 0 !important;
 
-      /* Avoid splitting key blocks */
-      .invTop, .invBlock, .invTotal, .invTotalBox {
-        break-inside: avoid;
-        page-break-inside: avoid;
-      }
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
 
-      /* Tables: let them flow across pages cleanly */
-      table { width:100% !important; border-collapse:collapse !important; }
-      thead { display: table-header-group; }
-      tfoot { display: table-footer-group; }
-      tr, td, th {
-        break-inside: avoid;
-        page-break-inside: avoid;
-      }
+    background: #fff !important;
+    color:#111 !important;
+    overflow: visible !important;
+  }
+
+  /* Paper styling: remove in-app card vibes */
+  .invoicePaper{
+    border:none !important;
+    border-radius:0 !important;
+    box-shadow:none !important;
+    padding:0 !important;
+    margin:0 !important;
+    background:#fff !important;
+    overflow: visible !important;
+  }
+
+  /* Keep key blocks together where possible */
+  .invTop, .invBlock, .invTotal, .invTotalBox, .invSigRow, .invMetaGrid {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Tables flow nicely across pages */
+  table { width:100% !important; border-collapse:collapse !important; }
+  thead { display: table-header-group; }
+  tfoot { display: table-footer-group; }
+
+  tr, td, th {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Print colors reliably */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
 
       /* Don’t clip content */
       * { overflow: visible !important; }
