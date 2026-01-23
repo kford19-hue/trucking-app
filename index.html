@@ -190,28 +190,25 @@
 
     /* =========================
        PRINT: invoice-only output
-       FIXED: no blank PDF
-       (We hide everything via visibility, then reveal invoicePreview)
     ========================= */
     @media print {
       @page { margin: 14mm; }
+
       html, body {
         background:#fff !important;
         color:#111 !important;
         height:auto !important;
       }
 
-      /* Hide EVERYTHING */
-      body * { visibility: hidden !important; }
+      /* Hide the entire app UI */
+      header, main, #toast {
+        display:none !important;
+      }
 
-      /* Reveal ONLY the invoice preview */
-      #invoicePreview, #invoicePreview * { visibility: visible !important; }
-
-      /* Position invoice at top-left so it prints cleanly */
-      #invoicePreview{
-        position: absolute !important;
-        left: 0 !important;
-        top: 0 !important;
+      /* ONLY show the invoice preview area */
+      #invoicePreview {
+        display:block !important;
+        position: static !important;
         width: 100% !important;
         margin: 0 !important;
         padding: 0 !important;
@@ -225,6 +222,7 @@
         overflow: visible !important;
       }
 
+      /* Remove the in-app preview padding so it prints flush */
       .invoicePaper{
         border:none !important;
         border-radius:0 !important;
@@ -235,16 +233,57 @@
         overflow: visible !important;
       }
 
-      .invTop, .invBlock, .invTotal, .invTotalBox { break-inside: avoid; page-break-inside: avoid; }
+      /* Avoid splitting key blocks */
+      .invTop, .invBlock, .invTotal, .invTotalBox {
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+
+      /* Tables: let them flow across pages cleanly */
       table { width:100% !important; border-collapse:collapse !important; }
       thead { display: table-header-group; }
       tfoot { display: table-footer-group; }
-      tr, td, th { break-inside: avoid; page-break-inside: avoid; }
+      tr, td, th {
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
 
+      /* Don’t clip content */
+      * { overflow: visible !important; }
+
+      /* Keep colors (Chrome sometimes fades them) */
       * {
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
-      }
+
+  /* ===== Loads Dropdown Styles ===== */
+  .loads-dropdown{
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    margin-top: 10px;
+  }
+
+  .loads-summary{
+    cursor: pointer;
+    padding: 12px 14px;
+    font-weight: 700;
+    color: var(--text);
+    background: var(--chip);
+    user-select: none;
+    list-style: none;
+  }
+
+  .loads-summary::-webkit-details-marker{ 
+    display:none; 
+  }
+
+  .loads-content{
+    padding: 10px;
+    max-height: 420px;
+    overflow-y: auto;
     }
   </style>
 </head>
@@ -421,9 +460,15 @@
         <input id="importFile" type="file" accept="application/json" class="hide" />
       </div>
 
-      <div class="hr"></div>
-      <div class="list" id="tripList"></div>
-    </div>
+<div class="hr"></div>
+
+<details class="loads-dropdown">
+  <summary class="loads-summary">📦 Loads / Trips (tap to open)</summary>
+
+  <div class="loads-content">
+    <div class="list" id="tripList"></div>
+  </div>
+</details>
   </section>
 
   <!-- BUDGET -->
@@ -700,1491 +745,964 @@
 <script type="text/javascript">
   console.log("SCRIPT START");
 
-  function setStatus(text){
-    const pill = document.getElementById("statusPill");
-    if(pill) pill.textContent = text;
-  }
-  window.addEventListener("error", (e)=>{
-    console.error("JS Error:", e?.error || e?.message || e);
-    setStatus("❌ Error (open Console)");
-  });
-  window.addEventListener("unhandledrejection", (e)=>{
-    console.error("Unhandled Promise Rejection:", e?.reason || e);
-    setStatus("❌ Error (open Console)");
-  });
+function setStatus(text){
+  const pill = document.getElementById("statusPill");
+  if(pill) pill.textContent = text;
+}
+window.addEventListener("error", (e)=>{
+  console.error("JS Error:", e?.error || e?.message || e);
+  setStatus("❌ Error (open Console)");
+});
+window.addEventListener("unhandledrejection", (e)=>{
+  console.error("Unhandled Promise Rejection:", e?.reason || e);
+  setStatus("❌ Error (open Console)");
+});
 
-  document.addEventListener("DOMContentLoaded", () => {
-    try {
-      if (typeof structuredClone !== "function") {
-        window.structuredClone = (obj) => JSON.parse(JSON.stringify(obj));
-      }
-      if (!window.crypto) window.crypto = {};
-      if (typeof window.crypto.randomUUID !== "function") {
-        window.crypto.randomUUID = () => {
-          return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-            const r = (Math.random() * 16) | 0;
-            const v = c === "x" ? r : (r & 0x3) | 0x8;
-            return v.toString(16);
-          });
-        };
-      }
-
-      const LS_KEY = "truckBudgetTracker.v1";
-      const money = (n)=> (isFinite(n) ? n : 0);
-      const fmtMoney = (n)=> "$" + money(n).toFixed(2);
-      const fmtNum = (n)=> (isFinite(n) ? n : 0).toLocaleString();
-
-      const defaults = {
-        lists: {
-          companies: ["Select…","ACME Logistics","Blue River Transport"],
-          shippers: ["Select…","Amazon","Walmart DC","Target DC"],
-          locations: ["Select…","Atlanta, GA","Dallas, TX","Chicago, IL","Newark, NJ"],
-          tires: ["Select…","22.5","24.5","11R22.5"],
-          trucks: ["Select…","101","102","103"],
-          trailers: ["Select…","T-201","T-202","T-203"],
-          budgetCats: [
-            "Household expenses","Groceries","Entertainment","Mortgage/Rent",
-            "Car note","Utilities","Phone/Internet","Insurance","Gas/Transportation",
-            "Personal","Savings","Medical"
-          ],
-          customers: ["Select…","CH Robinson","TQL","JB Hunt"],
-          consignees: ["Select…","Walmart DC","Amazon FC","Costco DC"]
-        },
-        rates: {
-          tiresPerMile: 0.05,
-          maintPerMile: 0.12,
-          platesPerMile: 0.02,
-          iftaPerMile: 0.03,
-          taxPctRevenue: 22,
-          targetMPG: 6.5
-        },
-        goals: { bizMonthly: 0, personalMonthly: 0 },
-        trips: [],
-        budget: {}
+document.addEventListener("DOMContentLoaded", () => {
+  try {
+    if (typeof structuredClone !== "function") {
+      window.structuredClone = (obj) => JSON.parse(JSON.stringify(obj));
+    }
+    if (!window.crypto) window.crypto = {};
+    if (typeof window.crypto.randomUUID !== "function") {
+      window.crypto.randomUUID = () => {
+        return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+          const r = (Math.random() * 16) | 0;
+          const v = c === "x" ? r : (r & 0x3) | 0x8;
+          return v.toString(16);
+        });
       };
+    }
 
-      function loadState(){
-        try{
-          const raw = localStorage.getItem(LS_KEY);
-          if(!raw) return structuredClone(defaults);
-          const parsed = JSON.parse(raw);
-          return {
-            ...structuredClone(defaults),
-            ...parsed,
-            lists: { ...structuredClone(defaults.lists), ...(parsed.lists||{}) },
-            rates: { ...structuredClone(defaults.rates), ...(parsed.rates||{}) },
-            goals: { ...structuredClone(defaults.goals), ...(parsed.goals||{}) },
-            trips: Array.isArray(parsed.trips) ? parsed.trips : [],
-            budget: parsed.budget || {}
-          };
-        } catch(e){
-          return structuredClone(defaults);
-        }
+    const LS_KEY = "truckBudgetTracker.v1";
+    const money = (n)=> (isFinite(n) ? n : 0);
+    const fmtMoney = (n)=> "$" + money(n).toFixed(2);
+    const fmtNum = (n)=> (isFinite(n) ? n : 0).toLocaleString();
+
+    const defaults = {
+      lists: {
+        companies: ["Select…","ACME Logistics","Blue River Transport"],
+        shippers: ["Select…","Amazon","Walmart DC","Target DC"],
+        locations: ["Select…","Atlanta, GA","Dallas, TX","Chicago, IL","Newark, NJ"],
+        tires: ["Select…","22.5","24.5","11R22.5"],
+        trucks: ["Select…","101","102","103"],
+        trailers: ["Select…","T-201","T-202","T-203"],
+        budgetCats: [
+          "Household expenses","Groceries","Entertainment","Mortgage/Rent",
+          "Car note","Utilities","Phone/Internet","Insurance","Gas/Transportation",
+          "Personal","Savings","Medical"
+        ],
+        customers: ["Select…","CH Robinson","TQL","JB Hunt"],
+        consignees: ["Select…","Walmart DC","Amazon FC","Costco DC"]
+      },
+      rates: {
+        tiresPerMile: 0.05,
+        maintPerMile: 0.12,
+        platesPerMile: 0.02,
+        iftaPerMile: 0.03,
+        taxPctRevenue: 22,
+        targetMPG: 6.5
+      },
+      goals: { bizMonthly: 0, personalMonthly: 0 },
+      trips: [],
+      budget: {}
+    };
+
+    function loadState(){
+      try{
+        const raw = localStorage.getItem(LS_KEY);
+        if(!raw) return structuredClone(defaults);
+        const parsed = JSON.parse(raw);
+        return {
+          ...structuredClone(defaults),
+          ...parsed,
+          lists: { ...structuredClone(defaults.lists), ...(parsed.lists||{}) },
+          rates: { ...structuredClone(defaults.rates), ...(parsed.rates||{}) },
+          goals: { ...structuredClone(defaults.goals), ...(parsed.goals||{}) },
+          trips: Array.isArray(parsed.trips) ? parsed.trips : [],
+          budget: parsed.budget || {}
+        };
+      } catch(e){
+        return structuredClone(defaults);
       }
-      function saveState(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
-      let state = loadState();
+    }
+    function saveState(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
+    let state = loadState();
 
-      const $ = (id)=> document.getElementById(id);
+    const $ = (id)=> document.getElementById(id);
 
-      function on(id, event, fn){
-        const el = $(id);
-        if(!el){
-          console.warn("Missing element:", "#" + id);
-          return;
-        }
-        el.addEventListener(event, fn);
+    function on(id, event, fn){
+      const el = $(id);
+      if(!el){
+        console.warn("Missing element:", "#" + id);
+        return;
       }
+      el.addEventListener(event, fn);
+    }
 
-      function toast(msg){
-        const t = $("toast");
-        if(!t) return;
-        t.textContent = msg;
-        t.classList.remove("hide");
-        setTimeout(()=> t.classList.add("hide"), 1700);
-      }
+    function toast(msg){
+      const t = $("toast");
+      if(!t) return;
+      t.textContent = msg;
+      t.classList.remove("hide");
+      setTimeout(()=> t.classList.add("hide"), 1700);
+    }
 
-      function fillSelect(selectEl, arr){
-        if(!selectEl) return;
-        selectEl.innerHTML = "";
-        (arr || []).forEach(v=>{
-          const opt = document.createElement("option");
-          opt.value = v;
-          opt.textContent = v;
-          selectEl.appendChild(opt);
+    function fillSelect(selectEl, arr){
+      if(!selectEl) return;
+      selectEl.innerHTML = "";
+      (arr || []).forEach(v=>{
+        const opt = document.createElement("option");
+        opt.value = v;
+        opt.textContent = v;
+        selectEl.appendChild(opt);
+      });
+    }
+
+    function todayISO(){
+      const d = new Date();
+      const off = d.getTimezoneOffset();
+      const local = new Date(d.getTime() - off*60000);
+      return local.toISOString().slice(0,10);
+    }
+    function isoNowDate(){ return todayISO(); }
+
+    function ensureSelect(arr){
+      if(arr[0] !== "Select…") arr.unshift("Select…");
+      return arr;
+    }
+    function escapeHtml(s){
+      return String(s||"").replace(/[&<>"']/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;" }[c]));
+    }
+
+    document.querySelectorAll(".tab").forEach(tab=>{
+      tab.addEventListener("click", ()=>{
+        document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
+        tab.classList.add("active");
+        const name = tab.dataset.tab;
+
+        ["trips","budget","dashboard","invoices","settings"].forEach(n=>{
+          const sec = $("tab-"+n);
+          if(sec) sec.classList.toggle("hide", n!==name);
         });
+
+        if(name==="dashboard") refreshDashboard();
+        if(name==="settings") loadSettingsUI();
+        if(name==="budget") loadBudgetUI();
+        if(name==="trips") renderTrips();
+        if(name==="invoices") loadInvoicesUI();
+      });
+    });
+
+    function loadTripDropdowns(){
+      fillSelect($("t_company"), state.lists.companies);
+      fillSelect($("t_shipper"), state.lists.shippers);
+      fillSelect($("t_pickup"), state.lists.locations);
+      fillSelect($("t_delivery"), state.lists.locations);
+      fillSelect($("t_tire"), state.lists.tires);
+      fillSelect($("t_truck"), state.lists.trucks);
+      fillSelect($("t_trailer"), state.lists.trailers);
+      fillSelect($("t_customer"), state.lists.customers);
+      fillSelect($("t_consignee"), state.lists.consignees);
+    }
+
+    function readTripForm(){
+      const loaded = money(parseFloat($("t_loaded_miles")?.value));
+      const deadhead = money(parseFloat($("t_deadhead_miles")?.value));
+      const miles = loaded + deadhead;
+
+      const revenue = money(parseFloat($("t_revenue")?.value));
+      const gal = money(parseFloat($("t_fuel_gal")?.value));
+      const cpg = money(parseFloat($("t_fuel_cpg")?.value));
+      const fuelCost = gal * cpg;
+
+      const tolls = money(parseFloat($("t_tolls")?.value));
+      const other = money(parseFloat($("t_other")?.value));
+
+      const autoTires = miles * state.rates.tiresPerMile;
+      const autoMaint = miles * state.rates.maintPerMile;
+      const autoPlates = miles * state.rates.platesPerMile;
+      const autoIFTA  = miles * state.rates.iftaPerMile;
+      const autoTax   = revenue * (state.rates.taxPctRevenue/100);
+
+      const resTires = ($("t_res_tires")?.value || "").trim()==="" ? autoTires : money(parseFloat($("t_res_tires").value));
+      const resMaint = ($("t_res_maint")?.value || "").trim()==="" ? autoMaint : money(parseFloat($("t_res_maint").value));
+      const resPlates= ($("t_res_plates")?.value||"").trim()==="" ? autoPlates: money(parseFloat($("t_res_plates").value));
+      const resIFTA  = ($("t_res_ifta")?.value||"").trim()==="" ? autoIFTA  : money(parseFloat($("t_res_ifta").value));
+      const resTax   = ($("t_res_tax")?.value||"").trim()===""  ? autoTax   : money(parseFloat($("t_res_tax").value));
+
+      let mpg = 0;
+      if(gal>0 && miles>0) mpg = miles / gal;
+      else if(miles>0) mpg = state.rates.targetMPG;
+
+      const totalExpenses = fuelCost + tolls + other + resTires + resMaint + resPlates + resIFTA + resTax;
+      const net = revenue - totalExpenses;
+
+      return {
+        date: $("t_date")?.value || todayISO(),
+        company: $("t_company")?.value,
+        truck: $("t_truck")?.value,
+        trailer: $("t_trailer")?.value,
+        tireSize: $("t_tire")?.value,
+        shipper: $("t_shipper")?.value,
+        ref: ($("t_ref")?.value || "").trim(),
+        pickup: $("t_pickup")?.value,
+        pickupAddr: ($("t_pickup_addr")?.value || "").trim(),
+        delivery: $("t_delivery")?.value,
+        deliveryAddr: ($("t_delivery_addr")?.value || "").trim(),
+        customer: $("t_customer")?.value,
+        consignee: $("t_consignee")?.value,
+        loadedMiles: loaded,
+        deadheadMiles: deadhead,
+        totalMiles: miles,
+        revenue,
+        fuelGallons: gal,
+        fuelCostPerGallon: cpg,
+        fuelCost,
+        tolls,
+        other,
+        reserves: { tires:resTires, maint:resMaint, plates:resPlates, ifta:resIFTA, tax:resTax },
+        totals: { totalExpenses, net, mpg },
+        notes: ($("t_notes")?.value || "").trim(),
+        id: crypto.randomUUID()
+      };
+    }
+
+    function updateTripKPIs(t){
+      if($("k_total_miles")) $("k_total_miles").textContent = fmtNum(t.totalMiles);
+      if($("k_fuel_cost")) $("k_fuel_cost").textContent = fmtMoney(t.fuelCost);
+      if($("k_mpg")) $("k_mpg").textContent = (t.totals.mpg||0).toFixed(2);
+      const netEl = $("k_net");
+      if(netEl){
+        netEl.textContent = fmtMoney(t.totals.net);
+        netEl.classList.remove("good","bad","warn");
+        netEl.classList.add(t.totals.net>=0 ? "good" : "bad");
       }
+    }
 
-      function todayISO(){
-        const d = new Date();
-        const off = d.getTimezoneOffset();
-        const local = new Date(d.getTime() - off*60000);
-        return local.toISOString().slice(0,10);
-      }
+    function renderTrips(){
+      const q = (($("searchTrips")?.value)||"").toLowerCase().trim();
+      const list = $("tripList");
+      if(!list) return;
+      list.innerHTML = "";
 
-      function ensureSelect(arr){
-        if(arr[0] !== "Select…") arr.unshift("Select…");
-        return arr;
-      }
-      function escapeHtml(s){
-        return String(s||"").replace(/[&<>"']/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;" }[c]));
-      }
-
-      document.querySelectorAll(".tab").forEach(tab=>{
-        tab.addEventListener("click", ()=>{
-          document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
-          tab.classList.add("active");
-          const name = tab.dataset.tab;
-
-          ["trips","budget","dashboard","invoices","settings"].forEach(n=>{
-            const sec = $("tab-"+n);
-            if(sec) sec.classList.toggle("hide", n!==name);
-          });
-
-          if(name==="dashboard") refreshDashboard();
-          if(name==="settings") loadSettingsUI();
-          if(name==="budget") loadBudgetUI();
-          if(name==="trips") renderTrips();
-          if(name==="invoices") loadInvoicesUI();
-        });
+      const filtered = state.trips.filter(t=>{
+        if(!q) return true;
+        const blob = [
+          t.company,t.shipper,t.pickup,t.delivery,t.ref,t.notes,t.truck,t.trailer,
+          t.customer,t.consignee
+        ].join(" ").toLowerCase();
+        return blob.includes(q);
       });
 
-      function loadTripDropdowns(){
-        fillSelect($("t_company"), state.lists.companies);
-        fillSelect($("t_shipper"), state.lists.shippers);
-        fillSelect($("t_pickup"), state.lists.locations);
-        fillSelect($("t_delivery"), state.lists.locations);
-        fillSelect($("t_tire"), state.lists.tires);
-        fillSelect($("t_truck"), state.lists.trucks);
-        fillSelect($("t_trailer"), state.lists.trailers);
-        fillSelect($("t_customer"), state.lists.customers);
-        fillSelect($("t_consignee"), state.lists.consignees);
+      if(filtered.length===0){
+        const div = document.createElement("div");
+        div.className="small";
+        div.textContent = state.trips.length===0 ? "No trips saved yet." : "No matches.";
+        list.appendChild(div);
+        return;
       }
 
-      function readTripForm(){
-        const loaded = money(parseFloat($("t_loaded_miles")?.value));
-        const deadhead = money(parseFloat($("t_deadhead_miles")?.value));
-        const miles = loaded + deadhead;
-
-        const revenue = money(parseFloat($("t_revenue")?.value));
-        const gal = money(parseFloat($("t_fuel_gal")?.value));
-        const cpg = money(parseFloat($("t_fuel_cpg")?.value));
-        const fuelCost = gal * cpg;
-
-        const tolls = money(parseFloat($("t_tolls")?.value));
-        const other = money(parseFloat($("t_other")?.value));
-
-        const autoTires = miles * state.rates.tiresPerMile;
-        const autoMaint = miles * state.rates.maintPerMile;
-        const autoPlates = miles * state.rates.platesPerMile;
-        const autoIFTA  = miles * state.rates.iftaPerMile;
-        const autoTax   = revenue * (state.rates.taxPctRevenue/100);
-
-        const resTires = ($("t_res_tires")?.value || "").trim()==="" ? autoTires : money(parseFloat($("t_res_tires").value));
-        const resMaint = ($("t_res_maint")?.value || "").trim()==="" ? autoMaint : money(parseFloat($("t_res_maint").value));
-        const resPlates= ($("t_res_plates")?.value||"").trim()==="" ? autoPlates: money(parseFloat($("t_res_plates").value));
-        const resIFTA  = ($("t_res_ifta")?.value||"").trim()==="" ? autoIFTA  : money(parseFloat($("t_res_ifta").value));
-        const resTax   = ($("t_res_tax")?.value||"").trim()===""  ? autoTax   : money(parseFloat($("t_res_tax").value));
-
-        let mpg = 0;
-        if(gal>0 && miles>0) mpg = miles / gal;
-        else if(miles>0) mpg = state.rates.targetMPG;
-
-        const totalExpenses = fuelCost + tolls + other + resTires + resMaint + resPlates + resIFTA + resTax;
-        const net = revenue - totalExpenses;
-
-        return {
-          date: $("t_date")?.value || todayISO(),
-          company: $("t_company")?.value,
-          truck: $("t_truck")?.value,
-          trailer: $("t_trailer")?.value,
-          tireSize: $("t_tire")?.value,
-          shipper: $("t_shipper")?.value,
-          ref: ($("t_ref")?.value || "").trim(),
-          pickup: $("t_pickup")?.value,
-          pickupAddr: ($("t_pickup_addr")?.value || "").trim(),
-          delivery: $("t_delivery")?.value,
-          deliveryAddr: ($("t_delivery_addr")?.value || "").trim(),
-          customer: $("t_customer")?.value,
-          consignee: $("t_consignee")?.value,
-          loadedMiles: loaded,
-          deadheadMiles: deadhead,
-          totalMiles: miles,
-          revenue,
-          fuelGallons: gal,
-          fuelCostPerGallon: cpg,
-          fuelCost,
-          tolls,
-          other,
-          reserves: { tires:resTires, maint:resMaint, plates:resPlates, ifta:resIFTA, tax:resTax },
-          totals: { totalExpenses, net, mpg },
-          notes: ($("t_notes")?.value || "").trim(),
-          id: crypto.randomUUID()
-        };
-      }
-
-      function updateTripKPIs(t){
-        if($("k_total_miles")) $("k_total_miles").textContent = fmtNum(t.totalMiles);
-        if($("k_fuel_cost")) $("k_fuel_cost").textContent = fmtMoney(t.fuelCost);
-        if($("k_mpg")) $("k_mpg").textContent = (t.totals.mpg||0).toFixed(2);
-        const netEl = $("k_net");
-        if(netEl){
-          netEl.textContent = fmtMoney(t.totals.net);
-          netEl.classList.remove("good","bad","warn");
-          netEl.classList.add(t.totals.net>=0 ? "good" : "bad");
-        }
-      }
-
-      function renderTrips(){
-        const q = (($("searchTrips")?.value)||"").toLowerCase().trim();
-        const list = $("tripList");
-        if(!list) return;
-        list.innerHTML = "";
-
-        const filtered = state.trips.filter(t=>{
-          if(!q) return true;
-          const blob = [
-            t.company,t.shipper,t.pickup,t.delivery,t.ref,t.notes,t.truck,t.trailer,
-            t.customer,t.consignee
-          ].join(" ").toLowerCase();
-          return blob.includes(q);
-        });
-
-        if(filtered.length===0){
-          const div = document.createElement("div");
-          div.className="small";
-          div.textContent = state.trips.length===0 ? "No trips saved yet." : "No matches.";
-          list.appendChild(div);
-          return;
-        }
-
-        filtered.slice(0,200).forEach(t=>{
-          const item = document.createElement("div");
-          item.className="item";
-
-          const top = document.createElement("div");
-          top.className="itemTop";
-          top.innerHTML = `
-            <div>
-              <div class="itemTitle"><b>${escapeHtml(t.company)}</b> · ${escapeHtml(t.pickup)} → ${escapeHtml(t.delivery)}</div>
-              <div class="itemMeta mono">
-                ${escapeHtml(t.date)} · Truck ${escapeHtml(t.truck)} / Trailer ${escapeHtml(t.trailer)}
-                ${t.ref ? " · Ref " + escapeHtml(t.ref) : ""}
-              </div>
-            </div>
-            <div class="btnRow" style="margin-top:0">
-              <button type="button" data-act="invoice" data-id="${escapeHtml(t.id)}">🧾 Invoice</button>
-              <button type="button" class="bad" data-act="delete" data-id="${escapeHtml(t.id)}">🗑️ Delete</button>
-            </div>
-          `;
-
-          const nums = document.createElement("div");
-          nums.className="itemNums mono";
-          nums.innerHTML = `
-            <div>Miles: <b>${fmtNum(t.totalMiles)}</b></div>
-            <div>Revenue: <b>${fmtMoney(t.revenue)}</b></div>
-            <div>Expenses: <b>${fmtMoney(t.totals?.totalExpenses||0)}</b></div>
-            <div>Net: <b style="color:${(t.totals?.net||0)>=0 ? "var(--good)" : "var(--bad)"}">${fmtMoney(t.totals?.net||0)}</b></div>
-          `;
-
-          item.appendChild(top);
-          item.appendChild(nums);
-
-          item.addEventListener("click", (e)=>{
-            const btn = e.target.closest("button");
-            if(!btn) return;
-            e.stopPropagation();
-            const act = btn.dataset.act;
-            const id = btn.dataset.id;
-            if(act==="delete") deleteTrip(id);
-            if(act==="invoice") {
-              document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
-              document.querySelector('.tab[data-tab="invoices"]')?.classList.add("active");
-              ["trips","budget","dashboard","invoices","settings"].forEach(n=>{
-                const sec = $("tab-"+n);
-                if(sec) sec.classList.toggle("hide", n!=="invoices");
-              });
-              loadInvoicesUI(id);
-              // build preview immediately for convenience
-              $("inv_trip").value = id;
-              buildInvoicePreview();
-            }
-          });
-
-          list.appendChild(item);
-        });
-      }
-
-      function clearTripForm(){
-        [
-          "t_date","t_company","t_truck","t_trailer","t_tire","t_shipper","t_ref",
-          "t_pickup","t_pickup_addr","t_delivery","t_delivery_addr",
-          "t_customer","t_consignee",
-          "t_loaded_miles","t_deadhead_miles","t_revenue","t_fuel_gal","t_fuel_cpg","t_tolls","t_other",
-          "t_res_tires","t_res_maint","t_res_plates","t_res_ifta","t_res_tax","t_notes"
-        ].forEach(id=>{
-          const el = $(id);
-          if(!el) return;
-          if(el.tagName==="SELECT") el.selectedIndex = 0;
-          else el.value = "";
-        });
-        $("t_date").value = todayISO();
-        updateTripKPIs(readTripForm());
-      }
-
-      function deleteTrip(id){
-        const idx = state.trips.findIndex(t=>t.id===id);
-        if(idx<0) return;
-        state.trips.splice(idx,1);
-        saveState();
-        toast("Deleted trip");
-        renderTrips();
-        loadInvoicesUI();
-        refreshDashboard();
-      }
-
-      function calcTrip(){
-        const t = readTripForm();
-        updateTripKPIs(t);
-        return t;
-      }
-
-      function saveTrip(){
-        const t = calcTrip();
-
-        const required = [
-          ["company","Company"],["truck","Truck #"],["trailer","Trailer #"],
-          ["shipper","Shipper"],["pickup","Pickup"],["delivery","Delivery"],
-          ["customer","Broker/Customer"],["consignee","Consignee"]
-        ];
-        const missing = required.filter(([k])=> !t[k] || t[k]==="Select…").map(([,label])=>label);
-        if(missing.length){
-          toast("Missing: " + missing.join(", "));
-          return;
-        }
-
-        state.trips.unshift(t);
-        state.trips = state.trips.slice(0,3000);
-        saveState();
-        toast("Saved trip");
-        renderTrips();
-        loadInvoicesUI();
-        refreshDashboard();
-      }
-
-      // ========= Budget =========
-      function loadBudgetUI(){
-        fillSelect($("b_cat"), ensureSelect((state.lists.budgetCats||[]).slice()));
-        if(!$("b_month").value) $("b_month").value = new Date().toISOString().slice(0,7);
-        if(!$("b_buffer").value) $("b_buffer").value = 15;
-        if(!$("b_withhold").value) $("b_withhold").value = 20;
-        if(!$("b_other_income").value) $("b_other_income").value = 0;
-        renderBudget();
-      }
-
-      function budgetKey(){
-        return ($("b_month")?.value || new Date().toISOString().slice(0,7));
-      }
-
-      function getMonthBudget(){
-        const key = budgetKey();
-        if(!state.budget[key]) state.budget[key] = [];
-        if(!Array.isArray(state.budget[key])) state.budget[key] = [];
-        return state.budget[key];
-      }
-
-      function renderBudget(){
-        const list = $("budgetList");
-        if(!list) return;
-        list.innerHTML = "";
-        const items = getMonthBudget();
-
-        if(items.length===0){
-          const div = document.createElement("div");
-          div.className="small";
-          div.textContent = "No expenses saved for this month.";
-          list.appendChild(div);
-        } else {
-          items.forEach((x, i)=>{
-            const item = document.createElement("div");
-            item.className="item";
-            item.innerHTML = `
-              <div class="itemTop">
-                <div>
-                  <div class="itemTitle"><b>${escapeHtml(x.cat)}</b> · ${fmtMoney(x.amt)}</div>
-                  <div class="itemMeta">${escapeHtml(x.note||"")}</div>
-                </div>
-                <div class="btnRow" style="margin-top:0">
-                  <button type="button" class="bad" data-i="${i}">🗑️</button>
-                </div>
-              </div>
-            `;
-            item.querySelector("button")?.addEventListener("click", (e)=>{
-              e.stopPropagation();
-              const idx = parseInt(e.target.dataset.i,10);
-              items.splice(idx,1);
-              saveState();
-              renderBudget();
-              calcBudget();
-              refreshDashboard();
-            });
-            list.appendChild(item);
-          });
-        }
-
-        calcBudget();
-      }
-
-      function addExpense(){
-        const cat = $("b_cat")?.value;
-        const amt = money(parseFloat($("b_amt")?.value));
-        const note = ($("b_note")?.value||"").trim();
-
-        if(!cat || cat==="Select…"){ toast("Pick a category"); return; }
-        if(!(amt>0)){ toast("Enter an amount"); return; }
-
-        const items = getMonthBudget();
-        items.unshift({ cat, amt, note, id: crypto.randomUUID() });
-        saveState();
-        $("b_amt").value = "";
-        $("b_note").value = "";
-        toast("Added");
-        renderBudget();
-        refreshDashboard();
-      }
-
-      function calcBudget(){
-        const items = getMonthBudget();
-        const total = items.reduce((a,x)=>a+money(x.amt),0);
-
-        const bufferPct = money(parseFloat($("b_buffer")?.value));
-        const withholdPct = money(parseFloat($("b_withhold")?.value));
-        const otherIncome = money(parseFloat($("b_other_income")?.value));
-        const paychecks = parseInt($("b_paychecks")?.value || "2",10) || 2;
-
-        const buffered = total * (1 + (bufferPct/100));
-        const neededNet = Math.max(0, buffered - otherIncome);
-        const neededGross = (withholdPct>=100) ? 0 : (neededNet / (1 - withholdPct/100));
-        const perCheck = paychecks>0 ? neededGross / paychecks : neededGross;
-
-        if($("k_b_total")) $("k_b_total").textContent = fmtMoney(total);
-        if($("k_b_gross")) $("k_b_gross").textContent = fmtMoney(neededGross);
-        if($("k_b_percheck")) $("k_b_percheck").textContent = fmtMoney(perCheck);
-        if($("k_b_net")) $("k_b_net").textContent = fmtMoney(neededNet);
-
-        return { total, neededGross, perCheck, neededNet };
-      }
-
-      function clearBudgetMonth(){
-        const key = budgetKey();
-        state.budget[key] = [];
-        saveState();
-        toast("Cleared month");
-        renderBudget();
-        refreshDashboard();
-      }
-
-      // ========= Goals =========
-      function saveGoals(){
-        state.goals.bizMonthly = money(parseFloat($("g_biz")?.value));
-        state.goals.personalMonthly = money(parseFloat($("g_personal")?.value));
-        saveState();
-        $("goalMsg").textContent = "Saved ✅";
-        setTimeout(()=> $("goalMsg").textContent="", 1400);
-        refreshDashboard();
-      }
-
-      // ========= Dashboard =========
-      function refreshDashboard(){
-        const years = new Set(state.trips.map(t=> (t.date||"").slice(0,4)).filter(Boolean));
-        const thisYear = String(new Date().getFullYear());
-        years.add(thisYear);
-
-        const yearSel = $("d_year");
-        if(yearSel){
-          yearSel.innerHTML = "";
-          Array.from(years).sort((a,b)=>b.localeCompare(a)).forEach(y=>{
-            const opt = document.createElement("option");
-            opt.value = y; opt.textContent = y;
-            yearSel.appendChild(opt);
-          });
-          if(!yearSel.value) yearSel.value = thisYear;
-        }
-
-        const y = $("d_year")?.value || thisYear;
-        const monthFilter = ($("d_month")?.value || "").trim();
-
-        const trips = state.trips.filter(t=>{
-          const yd = (t.date||"");
-          if(!yd.startsWith(y)) return false;
-          if(monthFilter && !yd.startsWith(monthFilter)) return false;
-          return true;
-        });
-
-        const revenue = trips.reduce((a,t)=>a+money(t.revenue),0);
-        const expenses = trips.reduce((a,t)=>a+money(t.totals?.totalExpenses),0);
-        const net = trips.reduce((a,t)=>a+money(t.totals?.net),0);
-        const miles = trips.reduce((a,t)=>a+money(t.totalMiles),0);
-
-        if($("d_rev")) $("d_rev").textContent = fmtMoney(revenue);
-        if($("d_exp")) $("d_exp").textContent = fmtMoney(expenses);
-        if($("d_net")) $("d_net").textContent = fmtMoney(net);
-        if($("d_miles")) $("d_miles").textContent = fmtNum(miles);
-
-        const goalBox = $("dashGoalBox");
-        const goalOk = $("dashGoalOk");
-<script type="text/javascript">
-  console.log("SCRIPT START");
-
-  function setStatus(text){
-    const pill = document.getElementById("statusPill");
-    if(pill) pill.textContent = text;
-  }
-  window.addEventListener("error", (e)=>{
-    console.error("JS Error:", e?.error || e?.message || e);
-    setStatus("❌ Error (open Console)");
-  });
-  window.addEventListener("unhandledrejection", (e)=>{
-    console.error("Unhandled Promise Rejection:", e?.reason || e);
-    setStatus("❌ Error (open Console)");
-  });
-
-  document.addEventListener("DOMContentLoaded", () => {
-    try {
-      if (typeof structuredClone !== "function") {
-        window.structuredClone = (obj) => JSON.parse(JSON.stringify(obj));
-      }
-      if (!window.crypto) window.crypto = {};
-      if (typeof window.crypto.randomUUID !== "function") {
-        window.crypto.randomUUID = () => {
-          return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-            const r = (Math.random() * 16) | 0;
-            const v = c === "x" ? r : (r & 0x3) | 0x8;
-            return v.toString(16);
-          });
-        };
-      }
-
-      const LS_KEY = "truckBudgetTracker.v1";
-      const money = (n)=> (isFinite(n) ? n : 0);
-      const fmtMoney = (n)=> "$" + money(n).toFixed(2);
-      const fmtNum = (n)=> (isFinite(n) ? n : 0).toLocaleString();
-
-      const defaults = {
-        lists: {
-          companies: ["Select…","ACME Logistics","Blue River Transport"],
-          shippers: ["Select…","Amazon","Walmart DC","Target DC"],
-          locations: ["Select…","Atlanta, GA","Dallas, TX","Chicago, IL","Newark, NJ"],
-          tires: ["Select…","22.5","24.5","11R22.5"],
-          trucks: ["Select…","101","102","103"],
-          trailers: ["Select…","T-201","T-202","T-203"],
-          budgetCats: [
-            "Household expenses","Groceries","Entertainment","Mortgage/Rent",
-            "Car note","Utilities","Phone/Internet","Insurance","Gas/Transportation",
-            "Personal","Savings","Medical"
-          ],
-          customers: ["Select…","CH Robinson","TQL","JB Hunt"],
-          consignees: ["Select…","Walmart DC","Amazon FC","Costco DC"]
-        },
-        rates: {
-          tiresPerMile: 0.05,
-          maintPerMile: 0.12,
-          platesPerMile: 0.02,
-          iftaPerMile: 0.03,
-          taxPctRevenue: 22,
-          targetMPG: 6.5
-        },
-        goals: { bizMonthly: 0, personalMonthly: 0 },
-        trips: [],
-        budget: {}
-      };
-
-      function loadState(){
-        try{
-          const raw = localStorage.getItem(LS_KEY);
-          if(!raw) return structuredClone(defaults);
-          const parsed = JSON.parse(raw);
-          return {
-            ...structuredClone(defaults),
-            ...parsed,
-            lists: { ...structuredClone(defaults.lists), ...(parsed.lists||{}) },
-            rates: { ...structuredClone(defaults.rates), ...(parsed.rates||{}) },
-            goals: { ...structuredClone(defaults.goals), ...(parsed.goals||{}) },
-            trips: Array.isArray(parsed.trips) ? parsed.trips : [],
-            budget: parsed.budget || {}
-          };
-        } catch(e){
-          return structuredClone(defaults);
-        }
-      }
-      function saveState(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
-      let state = loadState();
-
-      const $ = (id)=> document.getElementById(id);
-
-      function on(id, event, fn){
-        const el = $(id);
-        if(!el){
-          console.warn("Missing element:", "#" + id);
-          return;
-        }
-        el.addEventListener(event, fn);
-      }
-
-      function toast(msg){
-        const t = $("toast");
-        if(!t) return;
-        t.textContent = msg;
-        t.classList.remove("hide");
-        setTimeout(()=> t.classList.add("hide"), 1700);
-      }
-
-      function fillSelect(selectEl, arr){
-        if(!selectEl) return;
-        selectEl.innerHTML = "";
-        (arr || []).forEach(v=>{
-          const opt = document.createElement("option");
-          opt.value = v;
-          opt.textContent = v;
-          selectEl.appendChild(opt);
-        });
-      }
-
-      function todayISO(){
-        const d = new Date();
-        const off = d.getTimezoneOffset();
-        const local = new Date(d.getTime() - off*60000);
-        return local.toISOString().slice(0,10);
-      }
-
-      function ensureSelect(arr){
-        if(!Array.isArray(arr)) arr = [];
-        if(arr[0] !== "Select…") arr.unshift("Select…");
-        return arr;
-      }
-      function escapeHtml(s){
-        return String(s||"").replace(/[&<>"']/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;" }[c]));
-      }
-
-      document.querySelectorAll(".tab").forEach(tab=>{
-        tab.addEventListener("click", ()=>{
-          document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
-          tab.classList.add("active");
-          const name = tab.dataset.tab;
-
-          ["trips","budget","dashboard","invoices","settings"].forEach(n=>{
-            const sec = $("tab-"+n);
-            if(sec) sec.classList.toggle("hide", n!==name);
-          });
-
-          if(name==="dashboard") refreshDashboard();
-          if(name==="settings") loadSettingsUI();
-          if(name==="budget") loadBudgetUI();
-          if(name==="trips") renderTrips();
-          if(name==="invoices") loadInvoicesUI();
-        });
-      });
-
-      function loadTripDropdowns(){
-        fillSelect($("t_company"), state.lists.companies);
-        fillSelect($("t_shipper"), state.lists.shippers);
-        fillSelect($("t_pickup"), state.lists.locations);
-        fillSelect($("t_delivery"), state.lists.locations);
-        fillSelect($("t_tire"), state.lists.tires);
-        fillSelect($("t_truck"), state.lists.trucks);
-        fillSelect($("t_trailer"), state.lists.trailers);
-        fillSelect($("t_customer"), state.lists.customers);
-        fillSelect($("t_consignee"), state.lists.consignees);
-      }
-
-      function readTripForm(){
-        const loaded = money(parseFloat($("t_loaded_miles")?.value));
-        const deadhead = money(parseFloat($("t_deadhead_miles")?.value));
-        const miles = loaded + deadhead;
-
-        const revenue = money(parseFloat($("t_revenue")?.value));
-        const gal = money(parseFloat($("t_fuel_gal")?.value));
-        const cpg = money(parseFloat($("t_fuel_cpg")?.value));
-        const fuelCost = gal * cpg;
-
-        const tolls = money(parseFloat($("t_tolls")?.value));
-        const other = money(parseFloat($("t_other")?.value));
-
-        const autoTires = miles * state.rates.tiresPerMile;
-        const autoMaint = miles * state.rates.maintPerMile;
-        const autoPlates = miles * state.rates.platesPerMile;
-        const autoIFTA  = miles * state.rates.iftaPerMile;
-        const autoTax   = revenue * (state.rates.taxPctRevenue/100);
-
-        const resTires = ($("t_res_tires")?.value || "").trim()==="" ? autoTires : money(parseFloat($("t_res_tires").value));
-        const resMaint = ($("t_res_maint")?.value || "").trim()==="" ? autoMaint : money(parseFloat($("t_res_maint").value));
-        const resPlates= ($("t_res_plates")?.value||"").trim()==="" ? autoPlates: money(parseFloat($("t_res_plates").value));
-        const resIFTA  = ($("t_res_ifta")?.value||"").trim()==="" ? autoIFTA  : money(parseFloat($("t_res_ifta").value));
-        const resTax   = ($("t_res_tax")?.value||"").trim()===""  ? autoTax   : money(parseFloat($("t_res_tax").value));
-
-        let mpg = 0;
-        if(gal>0 && miles>0) mpg = miles / gal;
-        else if(miles>0) mpg = state.rates.targetMPG;
-
-        const totalExpenses = fuelCost + tolls + other + resTires + resMaint + resPlates + resIFTA + resTax;
-        const net = revenue - totalExpenses;
-
-        return {
-          date: $("t_date")?.value || todayISO(),
-          company: $("t_company")?.value,
-          truck: $("t_truck")?.value,
-          trailer: $("t_trailer")?.value,
-          tireSize: $("t_tire")?.value,
-          shipper: $("t_shipper")?.value,
-          ref: ($("t_ref")?.value || "").trim(),
-          pickup: $("t_pickup")?.value,
-          pickupAddr: ($("t_pickup_addr")?.value || "").trim(),
-          delivery: $("t_delivery")?.value,
-          deliveryAddr: ($("t_delivery_addr")?.value || "").trim(),
-          customer: $("t_customer")?.value,
-          consignee: $("t_consignee")?.value,
-          loadedMiles: loaded,
-          deadheadMiles: deadhead,
-          totalMiles: miles,
-          revenue,
-          fuelGallons: gal,
-          fuelCostPerGallon: cpg,
-          fuelCost,
-          tolls,
-          other,
-          reserves: { tires:resTires, maint:resMaint, plates:resPlates, ifta:resIFTA, tax:resTax },
-          totals: { totalExpenses, net, mpg },
-          notes: ($("t_notes")?.value || "").trim(),
-          id: crypto.randomUUID()
-        };
-      }
-
-      function updateTripKPIs(t){
-        if($("k_total_miles")) $("k_total_miles").textContent = fmtNum(t.totalMiles);
-        if($("k_fuel_cost")) $("k_fuel_cost").textContent = fmtMoney(t.fuelCost);
-        if($("k_mpg")) $("k_mpg").textContent = (t.totals.mpg||0).toFixed(2);
-        const netEl = $("k_net");
-        if(netEl){
-          netEl.textContent = fmtMoney(t.totals.net);
-          netEl.classList.remove("good","bad","warn");
-          netEl.classList.add(t.totals.net>=0 ? "good" : "bad");
-        }
-      }
-
-      function renderTrips(){
-        const q = (($("searchTrips")?.value)||"").toLowerCase().trim();
-        const list = $("tripList");
-        if(!list) return;
-        list.innerHTML = "";
-
-        const filtered = state.trips.filter(t=>{
-          if(!q) return true;
-          const blob = [
-            t.company,t.shipper,t.pickup,t.delivery,t.ref,t.notes,t.truck,t.trailer,
-            t.customer,t.consignee
-          ].join(" ").toLowerCase();
-          return blob.includes(q);
-        });
-
-        if(filtered.length===0){
-          const div = document.createElement("div");
-          div.className="small";
-          div.textContent = state.trips.length===0 ? "No trips saved yet." : "No matches.";
-          list.appendChild(div);
-          return;
-        }
-
-        filtered.slice(0,200).forEach(t=>{
-          const item = document.createElement("div");
-          item.className="item";
-
-          const top = document.createElement("div");
-          top.className="itemTop";
-          top.innerHTML = `
-            <div>
-              <div class="itemTitle"><b>${escapeHtml(t.company)}</b> · ${escapeHtml(t.pickup)} → ${escapeHtml(t.delivery)}</div>
-              <div class="itemMeta mono">
-                ${escapeHtml(t.date)} · Truck ${escapeHtml(t.truck)} / Trailer ${escapeHtml(t.trailer)}
-                ${t.ref ? " · Ref " + escapeHtml(t.ref) : ""}
-              </div>
-            </div>
-            <div class="btnRow" style="margin-top:0">
-              <button type="button" data-act="invoice" data-id="${escapeHtml(t.id)}">🧾 Invoice</button>
-              <button type="button" class="bad" data-act="delete" data-id="${escapeHtml(t.id)}">🗑️ Delete</button>
-            </div>
-          `;
-
-          const nums = document.createElement("div");
-          nums.className="itemNums mono";
-          nums.innerHTML = `
-            <div>Miles: <b>${fmtNum(t.totalMiles)}</b></div>
-            <div>Revenue: <b>${fmtMoney(t.revenue)}</b></div>
-            <div>Expenses: <b>${fmtMoney(t.totals?.totalExpenses||0)}</b></div>
-            <div>Net: <b style="color:${(t.totals?.net||0)>=0 ? "var(--good)" : "var(--bad)"}">${fmtMoney(t.totals?.net||0)}</b></div>
-          `;
-
-          item.appendChild(top);
-          item.appendChild(nums);
-
-          item.addEventListener("click", (e)=>{
-            const btn = e.target.closest("button");
-            if(!btn) return;
-            e.stopPropagation();
-            const act = btn.dataset.act;
-            const id = btn.dataset.id;
-            if(act==="delete") deleteTrip(id);
-            if(act==="invoice") {
-              document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
-              document.querySelector('.tab[data-tab="invoices"]')?.classList.add("active");
-              ["trips","budget","dashboard","invoices","settings"].forEach(n=>{
-                const sec = $("tab-"+n);
-                if(sec) sec.classList.toggle("hide", n!=="invoices");
-              });
-              loadInvoicesUI(id);
-              $("inv_trip").value = id;
-              buildInvoicePreview();
-            }
-          });
-
-          list.appendChild(item);
-        });
-      }
-
-      function clearTripForm(){
-        [
-          "t_date","t_company","t_truck","t_trailer","t_tire","t_shipper","t_ref",
-          "t_pickup","t_pickup_addr","t_delivery","t_delivery_addr",
-          "t_customer","t_consignee",
-          "t_loaded_miles","t_deadhead_miles","t_revenue","t_fuel_gal","t_fuel_cpg","t_tolls","t_other",
-          "t_res_tires","t_res_maint","t_res_plates","t_res_ifta","t_res_tax","t_notes"
-        ].forEach(id=>{
-          const el = $(id);
-          if(!el) return;
-          if(el.tagName==="SELECT") el.selectedIndex = 0;
-          else el.value = "";
-        });
-        if($("t_date")) $("t_date").value = todayISO();
-        updateTripKPIs(readTripForm());
-      }
-
-      function deleteTrip(id){
-        const idx = state.trips.findIndex(t=>t.id===id);
-        if(idx<0) return;
-        state.trips.splice(idx,1);
-        saveState();
-        toast("Deleted trip");
-        renderTrips();
-        loadInvoicesUI();
-        refreshDashboard();
-      }
-
-      function calcTrip(){
-        const t = readTripForm();
-        updateTripKPIs(t);
-        return t;
-      }
-
-      function saveTrip(){
-        const t = calcTrip();
-
-        const required = [
-          ["company","Company"],["truck","Truck #"],["trailer","Trailer #"],
-          ["shipper","Shipper"],["pickup","Pickup"],["delivery","Delivery"],
-          ["customer","Broker/Customer"],["consignee","Consignee"]
-        ];
-        const missing = required.filter(([k])=> !t[k] || t[k]==="Select…").map(([,label])=>label);
-        if(missing.length){
-          toast("Missing: " + missing.join(", "));
-          return;
-        }
-
-        state.trips.unshift(t);
-        state.trips = state.trips.slice(0,3000);
-        saveState();
-        toast("Saved trip");
-        renderTrips();
-        loadInvoicesUI();
-        refreshDashboard();
-      }
-
-      // ========= Budget =========
-      function loadBudgetUI(){
-        fillSelect($("b_cat"), ensureSelect((state.lists.budgetCats||[]).slice()));
-        if($("b_month") && !$("b_month").value) $("b_month").value = new Date().toISOString().slice(0,7);
-        if($("b_buffer") && !$("b_buffer").value) $("b_buffer").value = 15;
-        if($("b_withhold") && !$("b_withhold").value) $("b_withhold").value = 20;
-        if($("b_other_income") && !$("b_other_income").value) $("b_other_income").value = 0;
-        renderBudget();
-      }
-
-      function budgetKey(){
-        return ($("b_month")?.value || new Date().toISOString().slice(0,7));
-      }
-
-      function getMonthBudget(){
-        const key = budgetKey();
-        if(!state.budget[key]) state.budget[key] = [];
-        if(!Array.isArray(state.budget[key])) state.budget[key] = [];
-        return state.budget[key];
-      }
-
-      function renderBudget(){
-        const list = $("budgetList");
-        if(!list) return;
-        list.innerHTML = "";
-        const items = getMonthBudget();
-
-        if(items.length===0){
-          const div = document.createElement("div");
-          div.className="small";
-          div.textContent = "No expenses saved for this month.";
-          list.appendChild(div);
-        } else {
-          items.forEach((x, i)=>{
-            const item = document.createElement("div");
-            item.className="item";
-            item.innerHTML = `
-              <div class="itemTop">
-                <div>
-                  <div class="itemTitle"><b>${escapeHtml(x.cat)}</b> · ${fmtMoney(x.amt)}</div>
-                  <div class="itemMeta">${escapeHtml(x.note||"")}</div>
-                </div>
-                <div class="btnRow" style="margin-top:0">
-                  <button type="button" class="bad" data-i="${i}">🗑️</button>
-                </div>
-              </div>
-            `;
-            item.querySelector("button")?.addEventListener("click", (e)=>{
-              e.stopPropagation();
-              const idx = parseInt(e.target.dataset.i,10);
-              items.splice(idx,1);
-              saveState();
-              renderBudget();
-              calcBudget();
-              refreshDashboard();
-            });
-            list.appendChild(item);
-          });
-        }
-
-        calcBudget();
-      }
-
-      function addExpense(){
-        const cat = $("b_cat")?.value;
-        const amt = money(parseFloat($("b_amt")?.value));
-        const note = ($("b_note")?.value||"").trim();
-
-        if(!cat || cat==="Select…"){ toast("Pick a category"); return; }
-        if(!(amt>0)){ toast("Enter an amount"); return; }
-
-        const items = getMonthBudget();
-        items.unshift({ cat, amt, note, id: crypto.randomUUID() });
-        saveState();
-        if($("b_amt")) $("b_amt").value = "";
-        if($("b_note")) $("b_note").value = "";
-        toast("Added");
-        renderBudget();
-        refreshDashboard();
-      }
-
-      function calcBudget(){
-        const items = getMonthBudget();
-        const total = items.reduce((a,x)=>a+money(x.amt),0);
-
-        const bufferPct = money(parseFloat($("b_buffer")?.value));
-        const withholdPct = money(parseFloat($("b_withhold")?.value));
-        const otherIncome = money(parseFloat($("b_other_income")?.value));
-        const paychecks = parseInt($("b_paychecks")?.value || "2",10) || 2;
-
-        const buffered = total * (1 + (bufferPct/100));
-        const neededNet = Math.max(0, buffered - otherIncome);
-        const neededGross = (withholdPct>=100) ? 0 : (neededNet / (1 - withholdPct/100));
-        const perCheck = paychecks>0 ? neededGross / paychecks : neededGross;
-
-        if($("k_b_total")) $("k_b_total").textContent = fmtMoney(total);
-        if($("k_b_gross")) $("k_b_gross").textContent = fmtMoney(neededGross);
-        if($("k_b_percheck")) $("k_b_percheck").textContent = fmtMoney(perCheck);
-        if($("k_b_net")) $("k_b_net").textContent = fmtMoney(neededNet);
-
-        return { total, neededGross, perCheck, neededNet };
-      }
-
-      function clearBudgetMonth(){
-        const key = budgetKey();
-        state.budget[key] = [];
-        saveState();
-        toast("Cleared month");
-        renderBudget();
-        refreshDashboard();
-      }
-
-      // ========= Goals =========
-      function saveGoals(){
-        state.goals.bizMonthly = money(parseFloat($("g_biz")?.value));
-        state.goals.personalMonthly = money(parseFloat($("g_personal")?.value));
-        saveState();
-        if($("goalMsg")) {
-          $("goalMsg").textContent = "Saved ✅";
-          setTimeout(()=> { if($("goalMsg")) $("goalMsg").textContent=""; }, 1400);
-        }
-        refreshDashboard();
-      }
-
-      // ========= Dashboard =========
-      function refreshDashboard(){
-        const years = new Set(state.trips.map(t=> (t.date||"").slice(0,4)).filter(Boolean));
-        const thisYear = String(new Date().getFullYear());
-        years.add(thisYear);
-
-        const yearSel = $("d_year");
-        if(yearSel){
-          const current = yearSel.value;
-          yearSel.innerHTML = "";
-          Array.from(years).sort((a,b)=>b.localeCompare(a)).forEach(y=>{
-            const opt = document.createElement("option");
-            opt.value = y; opt.textContent = y;
-            yearSel.appendChild(opt);
-          });
-          yearSel.value = current || thisYear;
-        }
-
-        const y = $("d_year")?.value || thisYear;
-        const monthFilter = ($("d_month")?.value || "").trim();
-
-        const trips = state.trips.filter(t=>{
-          const yd = (t.date||"");
-          if(!yd.startsWith(y)) return false;
-          if(monthFilter && !yd.startsWith(monthFilter)) return false;
-          return true;
-        });
-
-        const revenue = trips.reduce((a,t)=>a+money(t.revenue),0);
-        const expenses = trips.reduce((a,t)=>a+money(t.totals?.totalExpenses),0);
-        const net = trips.reduce((a,t)=>a+money(t.totals?.net),0);
-        const miles = trips.reduce((a,t)=>a+money(t.totalMiles),0);
-
-        if($("d_rev")) $("d_rev").textContent = fmtMoney(revenue);
-        if($("d_exp")) $("d_exp").textContent = fmtMoney(expenses);
-        if($("d_net")) $("d_net").textContent = fmtMoney(net);
-        if($("d_miles")) $("d_miles").textContent = fmtNum(miles);
-
-        const goalBox = $("dashGoalBox");
-        const goalOk = $("dashGoalOk");
-
-        const monthKey = monthFilter || (new Date().toISOString().slice(0,7));
-        const monthTrips = state.trips.filter(t=> (t.date||"").startsWith(monthKey));
-        const monthRevenue = monthTrips.reduce((a,t)=>a+money(t.revenue),0);
-
-        const bizGoal = money(state.goals?.bizMonthly);
-        const personalGoal = money(state.goals?.personalMonthly);
-
-        // Personal needed = budget calc for selected month in Budget tab (if exists)
-        let personalNeeded = 0;
-        const budgetItems = state.budget?.[monthKey];
-        if(Array.isArray(budgetItems)){
-          const total = budgetItems.reduce((a,x)=>a+money(x.amt),0);
-          const bufferPct = 15;
-          personalNeeded = total * (1 + bufferPct/100);
-        }
-
-        // Display goal status
-        if(goalBox && goalOk){
-          goalBox.classList.add("hide");
-          goalOk.classList.add("hide");
-
-          const partsBad = [];
-          const partsOk = [];
-
-          if(bizGoal > 0){
-            if(monthRevenue < bizGoal) partsBad.push(`Business goal for ${monthKey}: ${fmtMoney(monthRevenue)} / ${fmtMoney(bizGoal)} (short ${fmtMoney(bizGoal-monthRevenue)})`);
-            else partsOk.push(`Business goal for ${monthKey}: ${fmtMoney(monthRevenue)} / ${fmtMoney(bizGoal)} ✅`);
-          }
-
-          if(personalGoal > 0){
-            if(monthRevenue < personalGoal) partsBad.push(`Personal income goal for ${monthKey}: ${fmtMoney(monthRevenue)} / ${fmtMoney(personalGoal)} (short ${fmtMoney(personalGoal-monthRevenue)})`);
-            else partsOk.push(`Personal income goal for ${monthKey}: ${fmtMoney(monthRevenue)} / ${fmtMoney(personalGoal)} ✅`);
-          }
-
-          if(personalNeeded > 0){
-            if(monthRevenue < personalNeeded) partsBad.push(`Budget “needed” estimate for ${monthKey}: ${fmtMoney(monthRevenue)} / ${fmtMoney(personalNeeded)} (short ${fmtMoney(personalNeeded-monthRevenue)})`);
-            else partsOk.push(`Budget “needed” estimate for ${monthKey}: ${fmtMoney(monthRevenue)} / ${fmtMoney(personalNeeded)} ✅`);
-          }
-
-          if(partsBad.length){
-            goalBox.innerHTML = "<b>Heads up:</b><br>" + partsBad.map(escapeHtml).join("<br>");
-            goalBox.classList.remove("hide");
-          } else if(partsOk.length){
-            goalOk.innerHTML = "<b>On track:</b><br>" + partsOk.map(escapeHtml).join("<br>");
-            goalOk.classList.remove("hide");
-          }
-        }
-
-        // Insights
-        const insightEl = $("insights");
-        if(insightEl){
-          insightEl.innerHTML = "";
-          const avgRpm = (miles>0) ? (revenue/miles) : 0;
-          const avgEpm = (miles>0) ? (expenses/miles) : 0;
-          const avgNpm = (miles>0) ? (net/miles) : 0;
-
-          const best = trips.slice().sort((a,b)=> money(b.totals?.net)-money(a.totals?.net))[0];
-          const worst = trips.slice().sort((a,b)=> money(a.totals?.net)-money(b.totals?.net))[0];
-
-          const cards = [];
-          cards.push({ title:"Average $/mile (revenue)", meta: fmtMoney(avgRpm) });
-          cards.push({ title:"Average $/mile (expenses)", meta: fmtMoney(avgEpm) });
-          cards.push({ title:"Average $/mile (net)", meta: fmtMoney(avgNpm) });
-
-          if(best){
-            cards.push({ title:"Best trip (net)", meta: `${fmtMoney(best.totals?.net||0)} · ${best.pickup} → ${best.delivery}` });
-          }
-          if(worst){
-            cards.push({ title:"Worst trip (net)", meta: `${fmtMoney(worst.totals?.net||0)} · ${worst.pickup} → ${worst.delivery}` });
-          }
-
-          if(trips.length===0){
-            const d = document.createElement("div");
-            d.className="small";
-            d.textContent="No trips in this filter yet.";
-            insightEl.appendChild(d);
-          } else {
-            cards.forEach(c=>{
-              const it = document.createElement("div");
-              it.className="item";
-              it.innerHTML = `<div class="itemTitle"><b>${escapeHtml(c.title)}</b></div><div class="itemMeta mono">${escapeHtml(c.meta)}</div>`;
-              insightEl.appendChild(it);
-            });
-          }
-        }
-
-        // Sync Goals UI fields (Budget tab)
-        if($("g_biz")) $("g_biz").value = state.goals?.bizMonthly ?? 0;
-        if($("g_personal")) $("g_personal").value = state.goals?.personalMonthly ?? 0;
-      }
-
-      // ========= Invoices =========
-      function loadInvoicesUI(selectTripId){
-        const sel = $("inv_trip");
-        if(!sel) return;
-
-        sel.innerHTML = "";
-        const placeholder = document.createElement("option");
-        placeholder.value = "";
-        placeholder.textContent = state.trips.length ? "Select a trip…" : "No trips saved yet";
-        sel.appendChild(placeholder);
-
-        state.trips.slice().forEach(t=>{
-          const opt = document.createElement("option");
-          opt.value = t.id;
-          opt.textContent = `${t.date} · ${t.company} · ${t.pickup} → ${t.delivery}`;
-          sel.appendChild(opt);
-        });
-
-        if(selectTripId){
-          sel.value = selectTripId;
-        }
-
-        if($("inv_date") && !$("inv_date").value) $("inv_date").value = todayISO();
-        if($("invoicePreview") && !selectTripId){
-          $("invoicePreview").innerHTML = `<div class="invMuted">No invoice selected yet.</div>`;
-        }
-      }
-
-      function invoiceNumberForTrip(t, override){
-        const raw = (override || "").trim();
-        if(raw) return raw;
-
-        // deterministic-ish: date + last 6 of id
-        const d = (t.date||"").replaceAll("-","");
-        const suffix = String(t.id||"").replaceAll("-","").slice(-6).toUpperCase();
-        return `INV-${d}-${suffix || "000000"}`;
-      }
-
-      function buildInvoicePreview(){
-        const tripId = ($("inv_trip")?.value || "").trim();
-        const out = $("invoicePreview");
-        if(!out) return;
-
-        const t = state.trips.find(x=>x.id===tripId);
-        if(!t){
-          out.innerHTML = `<div class="invMuted">No invoice selected yet.</div>`;
-          return;
-        }
-
-        const invDate = ($("inv_date")?.value || todayISO());
-        const invNum = invoiceNumberForTrip(t, $("inv_number")?.value);
-
-        // Simple “bill to” logic: customer/broker + consignee
-        const billTo = t.customer && t.customer!=="Select…" ? t.customer : "Customer";
-        const shipTo = t.consignee && t.consignee!=="Select…" ? t.consignee : "Consignee";
-
-        const miles = money(t.totalMiles);
-        const rpm = miles>0 ? (money(t.revenue)/miles) : 0;
-
-        out.innerHTML = `
-          <div class="invTop">
-            <div>
-              <h3 class="invH">INVOICE</h3>
-              <div class="invMuted">Invoice # <b>${escapeHtml(invNum)}</b></div>
-              <div class="invMuted">Invoice Date: <b>${escapeHtml(invDate)}</b></div>
-              <div class="invMuted">Trip Date: <b>${escapeHtml(t.date||"")}</b></div>
-            </div>
-            <div style="min-width:240px">
-              <div class="invMuted"><b>${escapeHtml(t.company||"Your Company")}</b></div>
-              <div class="invMuted">Truck ${escapeHtml(t.truck||"")} · Trailer ${escapeHtml(t.trailer||"")}</div>
-              <div class="invMuted">${t.ref ? ("Ref: " + escapeHtml(t.ref)) : ""}</div>
+      filtered.slice(0,200).forEach(t=>{
+        const item = document.createElement("div");
+        item.className="item";
+
+        const top = document.createElement("div");
+        top.className="itemTop";
+        top.innerHTML = `
+          <div>
+            <div class="itemTitle"><b>${escapeHtml(t.company)}</b> · ${escapeHtml(t.pickup)} → ${escapeHtml(t.delivery)}</div>
+            <div class="itemMeta mono">${escapeHtml(t.date)}
+            <div class="itemMeta mono">${escapeHtml(t.date)}
+              · Truck ${escapeHtml(t.truck)} / Trailer ${escapeHtml(t.trailer)}
+              ${t.ref ? " · Ref " + escapeHtml(t.ref) : ""}
             </div>
           </div>
-
-          <div class="invGrid2">
-            <div class="invBlock">
-              <div class="invMuted"><b>Bill To</b></div>
-              <div>${escapeHtml(billTo)}</div>
-              <div class="invMuted">${escapeHtml(t.customer||"")}</div>
-            </div>
-            <div class="invBlock">
-              <div class="invMuted"><b>Ship To</b></div>
-              <div>${escapeHtml(shipTo)}</div>
-              <div class="invMuted">${escapeHtml(t.consignee||"")}</div>
-            </div>
+          <div class="btnRow" style="margin-top:0">
+            <button type="button" data-act="invoice" data-id="${escapeHtml(t.id)}">🧾 Invoice</button>
+            <button type="button" class="bad" data-act="delete" data-id="${escapeHtml(t.id)}">🗑️ Delete</button>
           </div>
-
-          <div class="invBlock">
-            <div class="invMuted"><b>Load Details</b></div>
-            <div class="invMuted">Shipper: <b>${escapeHtml(t.shipper||"")}</b></div>
-            <div class="invMuted">Pickup: <b>${escapeHtml(t.pickup||"")}</b> ${t.pickupAddr?("· "+escapeHtml(t.pickupAddr)):""}</div>
-            <div class="invMuted">Delivery: <b>${escapeHtml(t.delivery||"")}</b> ${t.deliveryAddr?("· "+escapeHtml(t.deliveryAddr)):""}</div>
-          </div>
-
-          <table class="invTable">
-            <thead>
-              <tr>
-                <th>Description</th>
-                <th class="invRight">Qty</th>
-                <th class="invRight">Rate</th>
-                <th class="invRight">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Freight services (${escapeHtml(t.pickup||"")} → ${escapeHtml(t.delivery||"")})</td>
-                <td class="invRight mono">${fmtNum(miles)}</td>
-                <td class="invRight mono">${fmtMoney(rpm)}</td>
-                <td class="invRight mono"><b>${fmtMoney(t.revenue)}</b></td>
-              </tr>
-            </tbody>
-          </table>
-
-          <div class="invTotal">
-            <div class="invTotalBox">
-              <div class="invLine"><span>Subtotal</span><span class="mono">${fmtMoney(t.revenue)}</span></div>
-              <div class="invLine"><span>Fuel surcharge</span><span class="mono">${fmtMoney(0)}</span></div>
-              <div class="invLine invBig"><span>Total Due</span><span class="mono">${fmtMoney(t.revenue)}</span></div>
-            </div>
-          </div>
-
-          ${t.notes ? `<div class="invBlock"><div class="invMuted"><b>Notes</b></div><div>${escapeHtml(t.notes)}</div></div>` : ""}
         `;
-      }
 
-      function printInvoice(){
-        const tripId = ($("inv_trip")?.value || "").trim();
-        if(!tripId){ toast("Select a trip first"); return; }
-        buildInvoicePreview();
-        setTimeout(()=> window.print(), 50);
-      }
+        const nums = document.createElement("div");
+        nums.className="itemNums mono";
+        nums.innerHTML = `
+          <div>Miles: <b>${fmtNum(t.totalMiles)}</b></div>
+          <div>Revenue: <b>${fmtMoney(t.revenue)}</b></div>
+          <div>Expenses: <b>${fmtMoney(t.totals?.totalExpenses||0)}</b></div>
+          <div>Net: <b style="color:${(t.totals?.net||0)>=0 ? "var(--good)" : "var(--bad)"}">${fmtMoney(t.totals?.net||0)}</b></div>
+        `;
 
-      // ========= Settings =========
-      function loadSettingsUI(){
-        // lists
-        if($("s_companies")) $("s_companies").value = (state.lists.companies||[]).filter(x=>x!=="Select…").join("\n");
-        if($("s_shippers")) $("s_shippers").value = (state.lists.shippers||[]).filter(x=>x!=="Select…").join("\n");
-        if($("s_locations")) $("s_locations").value = (state.lists.locations||[]).filter(x=>x!=="Select…").join("\n");
-        if($("s_tires")) $("s_tires").value = (state.lists.tires||[]).filter(x=>x!=="Select…").join("\n");
-        if($("s_trucks")) $("s_trucks").value = (state.lists.trucks||[]).filter(x=>x!=="Select…").join("\n");
-        if($("s_trailers")) $("s_trailers").value = (state.lists.trailers||[]).filter(x=>x!=="Select…").join("\n");
-        if($("s_customers")) $("s_customers").value = (state.lists.customers||[]).filter(x=>x!=="Select…").join("\n");
-        if($("s_consignees")) $("s_consignees").value = (state.lists.consignees||[]).filter(x=>x!=="Select…").join("\n");
+        item.appendChild(top);
+        item.appendChild(nums);
 
-        // budget categories
-        if($("s_budget_cats")) $("s_budget_cats").value = (state.lists.budgetCats||[]).join("\n");
-
-        // rates
-        if($("r_tires")) $("r_tires").value = state.rates.tiresPerMile ?? 0;
-        if($("r_maint")) $("r_maint").value = state.rates.maintPerMile ?? 0;
-        if($("r_plates")) $("r_plates").value = state.rates.platesPerMile ?? 0;
-        if($("r_ifta")) $("r_ifta").value = state.rates.iftaPerMile ?? 0;
-        if($("r_tax_pct")) $("r_tax_pct").value = state.rates.taxPctRevenue ?? 0;
-        if($("r_mpg")) $("r_mpg").value = state.rates.targetMPG ?? 6.5;
-      }
-
-      function linesToList(text){
-        return (String(text||"")
-          .split("\n")
-          .map(x=>x.trim())
-          .filter(Boolean));
-      }
-
-      function saveListsFromSettings(){
-        state.lists.companies = ensureSelect(linesToList($("s_companies")?.value));
-        state.lists.shippers = ensureSelect(linesToList($("s_shippers")?.value));
-        state.lists.locations = ensureSelect(linesToList($("s_locations")?.value));
-        state.lists.tires = ensureSelect(linesToList($("s_tires")?.value));
-        state.lists.trucks = ensureSelect(linesToList($("s_trucks")?.value));
-        state.lists.trailers = ensureSelect(linesToList($("s_trailers")?.value));
-        state.lists.customers = ensureSelect(linesToList($("s_customers")?.value));
-        state.lists.consignees = ensureSelect(linesToList($("s_consignees")?.value));
-        saveState();
-        loadTripDropdowns();
-        loadBudgetUI();
-        loadInvoicesUI();
-        toast("Saved lists");
-      }
-
-      function resetLists(){
-        state.lists = structuredClone(defaults.lists);
-        saveState();
-        loadSettingsUI();
-        loadTripDropdowns();
-        loadBudgetUI();
-        loadInvoicesUI();
-        toast("Reset defaults");
-      }
-
-      function saveRates(){
-        state.rates.tiresPerMile = money(parseFloat($("r_tires")?.value));
-        state.rates.maintPerMile = money(parseFloat($("r_maint")?.value));
-        state.rates.platesPerMile = money(parseFloat($("r_plates")?.value));
-        state.rates.iftaPerMile = money(parseFloat($("r_ifta")?.value));
-        state.rates.taxPctRevenue = money(parseFloat($("r_tax_pct")?.value));
-        state.rates.targetMPG = money(parseFloat($("r_mpg")?.value)) || 6.5;
-        saveState();
-        toast("Saved rates");
-        updateTripKPIs(readTripForm());
-        refreshDashboard();
-      }
-
-      function saveBudgetCats(){
-        state.lists.budgetCats = linesToList($("s_budget_cats")?.value);
-        saveState();
-        toast("Saved categories");
-        loadBudgetUI();
-      }
-
-      function nukeAll(){
-        const ok = confirm("Delete ALL data? Trips, budget, goals. No undo.");
-        if(!ok) return;
-        state = structuredClone(defaults);
-        saveState();
-        loadTripDropdowns();
-        clearTripForm();
-        renderTrips();
-        loadBudgetUI();
-        loadInvoicesUI();
-        loadSettingsUI();
-        refreshDashboard();
-        toast("Wiped");
-      }
-
-      // ========= Export / Import =========
-      function exportData(){
-        const payload = JSON.stringify(state, null, 2);
-        const blob = new Blob([payload], { type:"application/json" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `trucking-made-simple-backup-${new Date().toISOString().slice(0,10)}.json`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-        toast("Exported");
-      }
-
-      function importDataFromFile(file){
-        const reader = new FileReader();
-        reader.onload = () => {
-          try{
-            const parsed = JSON.parse(String(reader.result||""));
-            // merge-ish with defaults so missing fields don't explode
-            state = {
-              ...structuredClone(defaults),
-              ...parsed,
-              lists: { ...structuredClone(defaults.lists), ...(parsed.lists||{}) },
-              rates: { ...structuredClone(defaults.rates), ...(parsed.rates||{}) },
-              goals: { ...structuredClone(defaults.goals), ...(parsed.goals||{}) },
-              trips: Array.isArray(parsed.trips) ? parsed.trips : [],
-              budget: parsed.budget || {}
-            };
-            saveState();
-            loadTripDropdowns();
-            renderTrips();
-            loadBudgetUI();
-            loadInvoicesUI();
-            loadSettingsUI();
-            refreshDashboard();
-            toast("Imported ✅");
-          } catch(e){
-            console.error(e);
-            toast("Import failed");
+        item.addEventListener("click", (e)=>{
+          const btn = e.target.closest("button");
+          if(!btn) return;
+          e.stopPropagation();
+          const act = btn.dataset.act;
+          const id = btn.dataset.id;
+          if(act==="delete") deleteTrip(id);
+          if(act==="invoice") {
+            // switch to invoice tab and select
+            document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
+            document.querySelector('.tab[data-tab="invoices"]')?.classList.add("active");
+            ["trips","budget","dashboard","invoices","settings"].forEach(n=>{
+              const sec = $("tab-"+n);
+              if(sec) sec.classList.toggle("hide", n!=="invoices");
+            });
+            loadInvoicesUI(id);
           }
-        };
-        reader.readAsText(file);
+        });
+
+        list.appendChild(item);
+      });
+    }
+
+    function clearTripForm(){
+      [
+        "t_date","t_company","t_truck","t_trailer","t_tire","t_shipper","t_ref",
+        "t_pickup","t_pickup_addr","t_delivery","t_delivery_addr",
+        "t_customer","t_consignee",
+        "t_loaded_miles","t_deadhead_miles","t_revenue","t_fuel_gal","t_fuel_cpg","t_tolls","t_other",
+        "t_res_tires","t_res_maint","t_res_plates","t_res_ifta","t_res_tax","t_notes"
+      ].forEach(id=>{
+        const el = $(id);
+        if(!el) return;
+        if(el.tagName==="SELECT") el.selectedIndex = 0;
+        else el.value = "";
+      });
+      $("t_date").value = todayISO();
+      updateTripKPIs(readTripForm());
+    }
+
+    function deleteTrip(id){
+      const idx = state.trips.findIndex(t=>t.id===id);
+      if(idx<0) return;
+      state.trips.splice(idx,1);
+      saveState();
+      toast("Deleted trip");
+      renderTrips();
+      loadInvoicesUI(); // refresh invoice dropdown
+      refreshDashboard();
+    }
+
+    function calcTrip(){
+      const t = readTripForm();
+      updateTripKPIs(t);
+      return t;
+    }
+
+    function saveTrip(){
+      const t = calcTrip();
+
+      // basic validation: prevent saving "Select…" placeholders as real values
+      const required = [
+        ["company","Company"],["truck","Truck #"],["trailer","Trailer #"],
+        ["shipper","Shipper"],["pickup","Pickup"],["delivery","Delivery"],
+        ["customer","Broker/Customer"],["consignee","Consignee"]
+      ];
+      const missing = required.filter(([k])=> !t[k] || t[k]==="Select…").map(([,label])=>label);
+      if(missing.length){
+        toast("Missing: " + missing.join(", "));
+        return;
       }
 
-      // ========= Wire Buttons =========
-      on("btn_calc","click", ()=> calcTrip());
-      on("btn_save","click", ()=> saveTrip());
-      on("btn_clear","click", ()=> clearTripForm());
-
-      on("searchTrips","input", ()=> renderTrips());
-
-      on("btn_export","click", ()=> exportData());
-      on("btn_import","click", ()=> $("importFile")?.click());
-      on("importFile","change", (e)=>{
-        const f = e.target.files && e.target.files[0];
-        if(!f) return;
-        importDataFromFile(f);
-        e.target.value = ""; // reset
-      });
-
-      on("btn_add_exp","click", ()=> addExpense());
-      on("btn_budget_calc","click", ()=> { calcBudget(); toast("Calculated"); });
-      on("btn_budget_clear","click", ()=> clearBudgetMonth());
-      on("b_month","change", ()=> { renderBudget(); refreshDashboard(); });
-      on("b_buffer","input", ()=> { calcBudget(); refreshDashboard(); });
-      on("b_withhold","input", ()=> { calcBudget(); refreshDashboard(); });
-      on("b_other_income","input", ()=> { calcBudget(); refreshDashboard(); });
-      on("b_paychecks","change", ()=> { calcBudget(); refreshDashboard(); });
-
-      on("btn_save_goals","click", ()=> saveGoals());
-
-      on("btn_dash","click", ()=> refreshDashboard());
-      on("d_year","change", ()=> refreshDashboard());
-      on("d_month","change", ()=> refreshDashboard());
-
-      on("btn_inv_preview","click", ()=> buildInvoicePreview());
-      on("btn_inv_print","click", ()=> printInvoice());
-      on("inv_trip","change", ()=> buildInvoicePreview());
-
-      on("btn_save_lists","click", ()=> saveListsFromSettings());
-      on("btn_reset_lists","click", ()=> resetLists());
-      on("btn_save_rates","click", ()=> saveRates());
-      on("btn_save_budget_cats","click", ()=> saveBudgetCats());
-      on("btn_nuke","click", ()=> nukeAll());
-
-      // ========= Initial Boot =========
-      if($("t_date")) $("t_date").value = todayISO();
-      loadTripDropdowns();
-      updateTripKPIs(readTripForm());
+      state.trips.unshift(t);
+      // keep newest first but don’t let it bloat forever
+      state.trips = state.trips.slice(0,3000);
+      saveState();
+      toast("Saved trip");
       renderTrips();
       loadInvoicesUI();
       refreshDashboard();
-      setStatus("✅ Ready");
-      console.log("SCRIPT READY");
-    } catch (err) {
-      console.error("BOOT ERROR:", err);
-      setStatus("❌ Boot error");
     }
-  });
+
+    // ========= Budget =========
+    function loadBudgetUI(){
+      fillSelect($("b_cat"), ensureSelect((state.lists.budgetCats||[]).slice()));
+      if(!$("b_month").value) $("b_month").value = new Date().toISOString().slice(0,7);
+      if(!$("b_buffer").value) $("b_buffer").value = 15;
+      if(!$("b_withhold").value) $("b_withhold").value = 20;
+      if(!$("b_other_income").value) $("b_other_income").value = 0;
+      renderBudget();
+    }
+
+    function budgetKey(){
+      return ($("b_month")?.value || new Date().toISOString().slice(0,7));
+    }
+
+    function getMonthBudget(){
+      const key = budgetKey();
+      if(!state.budget[key]) state.budget[key] = [];
+      if(!Array.isArray(state.budget[key])) state.budget[key] = [];
+      return state.budget[key];
+    }
+
+    function renderBudget(){
+      const list = $("budgetList");
+      if(!list) return;
+      list.innerHTML = "";
+      const items = getMonthBudget();
+
+      if(items.length===0){
+        const div = document.createElement("div");
+        div.className="small";
+        div.textContent = "No expenses saved for this month.";
+        list.appendChild(div);
+      } else {
+        items.forEach((x, i)=>{
+          const item = document.createElement("div");
+          item.className="item";
+          item.innerHTML = `
+            <div class="itemTop">
+              <div>
+                <div class="itemTitle"><b>${escapeHtml(x.cat)}</b> · ${fmtMoney(x.amt)}</div>
+                <div class="itemMeta">${escapeHtml(x.note||"")}</div>
+              </div>
+              <div class="btnRow" style="margin-top:0">
+                <button type="button" class="bad" data-i="${i}">🗑️</button>
+              </div>
+            </div>
+          `;
+          item.querySelector("button")?.addEventListener("click", (e)=>{
+            e.stopPropagation();
+            const idx = parseInt(e.target.dataset.i,10);
+            items.splice(idx,1);
+            saveState();
+            renderBudget();
+            calcBudget();
+            refreshDashboard();
+          });
+          list.appendChild(item);
+        });
+      }
+
+      calcBudget();
+    }
+
+    function addExpense(){
+      const cat = $("b_cat")?.value;
+      const amt = money(parseFloat($("b_amt")?.value));
+      const note = ($("b_note")?.value||"").trim();
+
+      if(!cat || cat==="Select…"){ toast("Pick a category"); return; }
+      if(!(amt>0)){ toast("Enter an amount"); return; }
+
+      const items = getMonthBudget();
+      items.unshift({ cat, amt, note, id: crypto.randomUUID() });
+      saveState();
+      $("b_amt").value = "";
+      $("b_note").value = "";
+      toast("Added");
+      renderBudget();
+      refreshDashboard();
+    }
+
+    function calcBudget(){
+      const items = getMonthBudget();
+      const total = items.reduce((a,x)=>a+money(x.amt),0);
+
+      const bufferPct = money(parseFloat($("b_buffer")?.value));
+      const withholdPct = money(parseFloat($("b_withhold")?.value));
+      const otherIncome = money(parseFloat($("b_other_income")?.value));
+      const paychecks = parseInt($("b_paychecks")?.value || "2",10) || 2;
+
+      const buffered = total * (1 + (bufferPct/100));
+      // you want to cover expenses minus other monthly income
+      const neededNet = Math.max(0, buffered - otherIncome);
+      // gross required before withholding
+      const neededGross = (withholdPct>=100) ? 0 : (neededNet / (1 - withholdPct/100));
+      const perCheck = paychecks>0 ? neededGross / paychecks : neededGross;
+
+      if($("k_b_total")) $("k_b_total").textContent = fmtMoney(total);
+      if($("k_b_gross")) $("k_b_gross").textContent = fmtMoney(neededGross);
+      if($("k_b_percheck")) $("k_b_percheck").textContent = fmtMoney(perCheck);
+      if($("k_b_net")) $("k_b_net").textContent = fmtMoney(neededNet);
+
+      return { total, neededGross, perCheck, neededNet };
+    }
+
+    function clearBudgetMonth(){
+      const key = budgetKey();
+      state.budget[key] = [];
+      saveState();
+      toast("Cleared month");
+      renderBudget();
+      refreshDashboard();
+    }
+
+    // ========= Goals =========
+    function saveGoals(){
+      state.goals.bizMonthly = money(parseFloat($("g_biz")?.value));
+      state.goals.personalMonthly = money(parseFloat($("g_personal")?.value));
+      saveState();
+      $("goalMsg").textContent = "Saved ✅";
+      setTimeout(()=> $("goalMsg").textContent="", 1400);
+      refreshDashboard();
+    }
+
+    // ========= Dashboard =========
+    function refreshDashboard(){
+      // build year list
+      const years = new Set(state.trips.map(t=> (t.date||"").slice(0,4)).filter(Boolean));
+      const thisYear = String(new Date().getFullYear());
+      years.add(thisYear);
+
+      const yearSel = $("d_year");
+      if(yearSel){
+        yearSel.innerHTML = "";
+        Array.from(years).sort((a,b)=>b.localeCompare(a)).forEach(y=>{
+          const opt = document.createElement("option");
+          opt.value = y; opt.textContent = y;
+          yearSel.appendChild(opt);
+        });
+        if(!yearSel.value) yearSel.value = thisYear;
+      }
+
+      const y = $("d_year")?.value || thisYear;
+      const monthFilter = ($("d_month")?.value || "").trim(); // YYYY-MM
+
+      const trips = state.trips.filter(t=>{
+        const yd = (t.date||"");
+        if(!yd.startsWith(y)) return false;
+        if(monthFilter && !yd.startsWith(monthFilter)) return false;
+        return true;
+      });
+
+      const revenue = trips.reduce((a,t)=>a+money(t.revenue),0);
+      const expenses = trips.reduce((a,t)=>a+money(t.totals?.totalExpenses),0);
+      const net = trips.reduce((a,t)=>a+money(t.totals?.net),0);
+      const miles = trips.reduce((a,t)=>a+money(t.totalMiles),0);
+
+      if($("d_rev")) $("d_rev").textContent = fmtMoney(revenue);
+      if($("d_exp")) $("d_exp").textContent = fmtMoney(expenses);
+      if($("d_net")) $("d_net").textContent = fmtMoney(net);
+      if($("d_miles")) $("d_miles").textContent = fmtNum(miles);
+
+      // goal compare (monthly goals vs chosen month if set, otherwise YTD heads-up)
+      const goalBox = $("dashGoalBox");
+      const goalOk = $("dashGoalOk");
+      if(goalBox && goalOk){
+        goalBox.classList.add("hide");
+        goalOk.classList.add("hide");
+
+        const bizGoal = money(state.goals.bizMonthly);
+        const personGoal = money(state.goals.personalMonthly);
+
+        if(monthFilter && (bizGoal>0 || personGoal>0)){
+          const msgParts = [];
+          const okParts = [];
+          if(bizGoal>0){
+            if(revenue < bizGoal) msgParts.push(`Business revenue is ${fmtMoney(bizGoal - revenue)} below goal (${fmtMoney(bizGoal)}).`);
+            else okParts.push(`Business goal hit: ${fmtMoney(revenue)} / ${fmtMoney(bizGoal)} ✅`);
+          }
+          if(personGoal>0){
+            // "personal goal" loosely equals net after trip expenses
+            if(net < personGoal) msgParts.push(`Personal net is ${fmtMoney(personGoal - net)} below goal (${fmtMoney(personGoal)}).`);
+            else okParts.push(`Personal goal hit: ${fmtMoney(net)} / ${fmtMoney(personGoal)} ✅`);
+          }
+
+          if(msgParts.length){
+            goalBox.textContent = msgParts.join(" ");
+            goalBox.classList.remove("hide");
+          }
+          if(okParts.length){
+            goalOk.textContent = okParts.join(" ");
+            goalOk.classList.remove("hide");
+          }
+        }
+      }
+
+      // insights
+      const ins = $("insights");
+      if(ins){
+        ins.innerHTML = "";
+        if(trips.length===0){
+          const div = document.createElement("div");
+          div.className="small";
+          div.textContent = "No trips in this filter.";
+          ins.appendChild(div);
+        } else {
+          const avgNet = net / Math.max(1,trips.length);
+          const revPerMile = revenue / Math.max(1,miles);
+          const netPerMile = net / Math.max(1,miles);
+
+          const blocks = [
+            `Trips: <b>${fmtNum(trips.length)}</b>`,
+            `Avg net per trip: <b>${fmtMoney(avgNet)}</b>`,
+            `Revenue per mile: <b>${fmtMoney(revPerMile)}</b>`,
+            `Net per mile: <b>${fmtMoney(netPerMile)}</b>`
+          ];
+
+          blocks.forEach(html=>{
+            const item = document.createElement("div");
+            item.className="item";
+            item.innerHTML = `<div class="itemTitle">${html}</div>`;
+            ins.appendChild(item);
+          });
+
+          // Top lanes by net
+          const lanes = {};
+          trips.forEach(t=>{
+            const key = `${t.pickup} → ${t.delivery}`;
+            lanes[key] = (lanes[key]||0) + money(t.totals?.net);
+          });
+          const best = Object.entries(lanes).sort((a,b)=>b[1]-a[1]).slice(0,3);
+          if(best.length){
+            const item = document.createElement("div");
+            item.className="item";
+            item.innerHTML = `<div class="itemTitle"><b>Top lanes (by net)</b></div>` +
+              best.map(([k,v])=>`<div class="itemMeta">${escapeHtml(k)}: <span class="mono">${fmtMoney(v)}</span></div>`).join("");
+            ins.appendChild(item);
+          }
+        }
+      }
+    }
+
+    // ========= Settings =========
+    function linesToList(txt){
+      return (txt||"")
+        .split("\n")
+        .map(s=>s.trim())
+        .filter(Boolean);
+    }
+    function listToLines(arr){
+      return (arr||[]).filter(v=>v!=="Select…").join("\n");
+    }
+
+    function loadSettingsUI(){
+      $("s_companies").value  = listToLines(state.lists.companies);
+      $("s_shippers").value   = listToLines(state.lists.shippers);
+      $("s_locations").value  = listToLines(state.lists.locations);
+      $("s_tires").value      = listToLines(state.lists.tires);
+      $("s_trucks").value     = listToLines(state.lists.trucks);
+      $("s_trailers").value   = listToLines(state.lists.trailers);
+      $("s_customers").value  = listToLines(state.lists.customers);
+      $("s_consignees").value = listToLines(state.lists.consignees);
+      $("s_budget_cats").value= (state.lists.budgetCats||[]).join("\n");
+
+      $("r_tires").value = state.rates.tiresPerMile;
+      $("r_maint").value = state.rates.maintPerMile;
+      $("r_plates").value= state.rates.platesPerMile;
+      $("r_ifta").value  = state.rates.iftaPerMile;
+      $("r_tax_pct").value = state.rates.taxPctRevenue;
+      $("r_mpg").value   = state.rates.targetMPG;
+    }
+
+    function saveLists(){
+      const companies  = ensureSelect(linesToList($("s_companies").value));
+      const shippers   = ensureSelect(linesToList($("s_shippers").value));
+      const locations  = ensureSelect(linesToList($("s_locations").value));
+      const tires      = ensureSelect(linesToList($("s_tires").value));
+      const trucks     = ensureSelect(linesToList($("s_trucks").value));
+      const trailers   = ensureSelect(linesToList($("s_trailers").value));
+      const customers  = ensureSelect(linesToList($("s_customers").value));
+      const consignees = ensureSelect(linesToList($("s_consignees").value));
+
+      const budgetCats = linesToList($("s_budget_cats").value);
+
+      state.lists.companies = companies.length?companies:structuredClone(defaults.lists.companies);
+      state.lists.shippers  = shippers.length?shippers:structuredClone(defaults.lists.shippers);
+      state.lists.locations = locations.length?locations:structuredClone(defaults.lists.locations);
+      state.lists.tires     = tires.length?tires:structuredClone(defaults.lists.tires);
+      state.lists.trucks    = trucks.length?trucks:structuredClone(defaults.lists.trucks);
+      state.lists.trailers  = trailers.length?trailers:structuredClone(defaults.lists.trailers);
+      state.lists.customers = customers.length?customers:structuredClone(defaults.lists.customers);
+      state.lists.consignees= consignees.length?consignees:structuredClone(defaults.lists.consignees);
+      state.lists.budgetCats= budgetCats.length?budgetCats:structuredClone(defaults.lists.budgetCats);
+
+      saveState();
+      loadTripDropdowns();
+      loadBudgetUI();
+      toast("Saved lists");
+      refreshDashboard();
+      loadInvoicesUI();
+    }
+
+    function resetLists(){
+      state.lists = structuredClone(defaults.lists);
+      saveState();
+      loadSettingsUI();
+      loadTripDropdowns();
+      loadBudgetUI();
+      toast("Reset defaults");
+      loadInvoicesUI();
+      refreshDashboard();
+    }
+
+    function saveRates(){
+      state.rates.tiresPerMile = money(parseFloat($("r_tires")?.value));
+      state.rates.maintPerMile = money(parseFloat($("r_maint")?.value));
+      state.rates.platesPerMile= money(parseFloat($("r_plates")?.value));
+      state.rates.iftaPerMile  = money(parseFloat($("r_ifta")?.value));
+      state.rates.taxPctRevenue= money(parseFloat($("r_tax_pct")?.value));
+      state.rates.targetMPG    = money(parseFloat($("r_mpg")?.value)) || defaults.rates.targetMPG;
+      saveState();
+      toast("Saved rates");
+    }
+
+    function nukeAll(){
+      const ok = confirm("Delete ALL data? This cannot be undone.");
+      if(!ok) return;
+      localStorage.removeItem(LS_KEY);
+      state = loadState();
+      loadTripDropdowns();
+      loadSettingsUI();
+      loadBudgetUI();
+      clearTripForm();
+      renderTrips();
+      loadInvoicesUI();
+      refreshDashboard();
+      toast("All data wiped");
+    }
+
+    // ========= Export / Import =========
+    function exportData(){
+      const blob = new Blob([JSON.stringify(state, null, 2)], {type:"application/json"});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "trucking-made-simple-backup.json";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast("Exported");
+    }
+
+    function importData(file){
+      const reader = new FileReader();
+      reader.onload = ()=>{
+        try{
+          const parsed = JSON.parse(String(reader.result||""));
+          // merge into defaults safely
+          state = {
+            ...structuredClone(defaults),
+            ...parsed,
+            lists: { ...structuredClone(defaults.lists), ...(parsed.lists||{}) },
+            rates: { ...structuredClone(defaults.rates), ...(parsed.rates||{}) },
+            goals: { ...structuredClone(defaults.goals), ...(parsed.goals||{}) },
+            trips: Array.isArray(parsed.trips) ? parsed.trips : [],
+            budget: parsed.budget || {}
+          };
+          saveState();
+          loadTripDropdowns();
+          loadSettingsUI();
+          loadBudgetUI();
+          renderTrips();
+          loadInvoicesUI();
+          refreshDashboard();
+          toast("Imported ✅");
+        } catch(e){
+          console.error(e);
+          toast("Import failed");
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    // ========= Invoices =========
+    function loadInvoicesUI(preselectTripId){
+      const sel = $("inv_trip");
+      if(!sel) return;
+      sel.innerHTML = "";
+
+      const opt0 = document.createElement("option");
+      opt0.value = "";
+      opt0.textContent = "Select a trip…";
+      sel.appendChild(opt0);
+
+      state.trips.slice(0,300).forEach(t=>{
+        const opt = document.createElement("option");
+        opt.value = t.id;
+        const label = `${t.date} · ${t.company} · ${t.pickup} → ${t.delivery}` + (t.ref ? ` · ${t.ref}` : "");
+        opt.textContent = label;
+        sel.appendChild(opt);
+      });
+
+      if(preselectTripId){
+        sel.value = preselectTripId;
+      }
+    }
+
+    function nextInvoiceNumber(){
+      // simple: INV-YYYYMMDD-XXXX where XXXX increments by count today
+      const d = todayISO().replace(/-/g,"");
+      const todays = state.trips.filter(t=> (t.date||"").replace(/-/g,"")===d).length;
+      const seq = String(Math.max(1,todays)).padStart(4,"0");
+      return `INV-${d}-${seq}`;
+    }
+
+    function buildInvoiceHTML(trip, invDate, invNo){
+      const safe = escapeHtml;
+      const items = [
+        { label: "Loaded miles", val: fmtNum(trip.loadedMiles) },
+        { label: "Deadhead miles", val: fmtNum(trip.deadheadMiles) },
+        { label: "Total miles", val: fmtNum(trip.totalMiles) }
+      ];
+
+      return `
+        <div class="invTop">
+          <div>
+            <div class="invH">INVOICE</div>
+            <div class="invMuted">Invoice #: <b>${safe(invNo)}</b></div>
+            <div class="invMuted">Invoice Date: <b>${safe(invDate)}</b></div>
+          </div>
+          <div style="text-align:right">
+            <div class="invMuted">Company</div>
+            <div style="font-size:14px;font-weight:700">${safe(trip.company)}</div>
+            <div class="invMuted">Truck ${safe(trip.truck)} · Trailer ${safe(trip.trailer)}</div>
+          </div>
+        </div>
+
+        <div class="invGrid2">
+          <div class="invBlock">
+            <div style="font-weight:800;margin-bottom:6px">Load Info</div>
+            <div class="invMuted">Shipper: <b>${safe(trip.shipper)}</b></div>
+            <div class="invMuted">Broker/Customer: <b>${safe(trip.customer)}</b></div>
+            <div class="invMuted">Consignee: <b>${safe(trip.consignee)}</b></div>
+            ${trip.ref ? `<div class="invMuted">Reference: <b>${safe(trip.ref)}</b></div>` : ""}
+            ${trip.notes ? `<div class="invMuted">Notes: <b>${safe(trip.notes)}</b></div>` : ""}
+          </div>
+
+          <div class="invBlock">
+            <div style="font-weight:800;margin-bottom:6px">Route</div>
+            <div class="invMuted">Pickup: <b>${safe(trip.pickup)}</b></div>
+            ${trip.pickupAddr ? `<div class="invMuted">${safe(trip.pickupAddr)}</div>` : ""}
+            <div class="invMuted" style="margin-top:8px">Delivery: <b>${safe(trip.delivery)}</b></div>
+            ${trip.deliveryAddr ? `<div class="invMuted">${safe(trip.deliveryAddr)}</div>` : ""}
+          </div>
+        </div>
+
+        <table class="invTable">
+          <thead>
+            <tr>
+              <th>Description</th>
+              <th class="invRight">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Freight Charge</td>
+              <td class="invRight mono"><b>${fmtMoney(trip.revenue)}</b></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="invTotal">
+          <div class="invTotalBox">
+            <div class="invLine"><span>Subtotal</span><span class="mono">${fmtMoney(trip.revenue)}</span></div>
+            <div class="invLine invBig"><span>Total Due</span><span class="mono">${fmtMoney(trip.revenue)}</span></div>
+          </div>
+        </div>
+
+        <div class="invBlock" style="margin-top:12px">
+          <div style="font-weight:800;margin-bottom:6px">Trip Stats (for your records)</div>
+          ${items.map(x=>`<div class="invMuted">${safe(x.label)}: <b class="mono">${safe(x.val)}</b></div>`).join("")}
+        </div>
+
+        <div class="invMuted" style="margin-top:12px">
+          Thank you for your business.
+        </div>
+      `;
+    }
+
+    function buildInvoicePreview(){
+      const id = $("inv_trip")?.value;
+      if(!id){ toast("Select a trip"); return; }
+
+      const trip = state.trips.find(t=>t.id===id);
+      if(!trip){ toast("Trip not found"); return; }
+
+      const invDate = ($("inv_date")?.value || trip.date || todayISO());
+      const invNo = (($("inv_number")?.value||"").trim() || nextInvoiceNumber());
+
+      const preview = $("invoicePreview");
+      if(preview){
+        preview.innerHTML = buildInvoiceHTML(trip, invDate, invNo);
+      }
+      toast("Invoice built");
+    }
+
+    function printInvoice(){
+      // ensure preview exists so print shows something
+      const preview = $("invoicePreview");
+      if(preview && (preview.textContent||"").includes("No invoice selected")){
+        buildInvoicePreview();
+      }
+      window.print();
+    }
+
+    // ========= Wire up events =========
+    on("btn_calc","click", ()=> calcTrip());
+    on("btn_save","click", ()=> saveTrip());
+    on("btn_clear","click", ()=> { clearTripForm(); toast("Cleared"); });
+
+    on("searchTrips","input", ()=> renderTrips());
+
+    on("btn_export","click", ()=> exportData());
+    on("btn_import","click", ()=> $("importFile")?.click());
+    on("importFile","change", (e)=>{
+      const f = e.target.files && e.target.files[0];
+      if(f) importData(f);
+      e.target.value = "";
+    });
+
+    on("btn_add_exp","click", ()=> addExpense());
+    on("btn_budget_calc","click", ()=> { calcBudget(); toast("Calculated"); });
+    on("btn_budget_clear","click", ()=> clearBudgetMonth());
+    on("b_month","change", ()=> renderBudget());
+    on("b_buffer","input", ()=> calcBudget());
+    on("b_withhold","input", ()=> calcBudget());
+    on
+    ("b_withhold","input", ()=> calcBudget());
+    on("b_other_income","input", ()=> calcBudget());
+    on("b_paychecks","change", ()=> calcBudget());
+
+    on("btn_save_goals","click", ()=> saveGoals());
+
+    on("btn_dash","click", ()=> refreshDashboard());
+    on("d_year","change", ()=> refreshDashboard());
+    on("d_month","change", ()=> refreshDashboard());
+
+    on("btn_save_lists","click", ()=> saveLists());
+    on("btn_reset_lists","click", ()=> resetLists());
+
+    on("btn_save_rates","click", ()=> saveRates());
+
+    on("btn_save_budget_cats","click", ()=> saveLists());
+
+    on("btn_nuke","click", ()=> nukeAll());
+
+    on("btn_inv_preview","click", ()=> buildInvoicePreview());
+    on("btn_inv_print","click", ()=> printInvoice());
+
+    on("inv_trip","change", ()=>{
+      // optional: auto-build preview on selection (comment out if you hate convenience)
+      // buildInvoicePreview();
+    });
+
+    // ========= Init =========
+    loadTripDropdowns();
+    loadSettingsUI();
+    loadBudgetUI();
+
+    // default date
+    if($("t_date")) $("t_date").value = todayISO();
+
+    // first paint
+    updateTripKPIs(readTripForm());
+    renderTrips();
+    loadInvoicesUI();
+    refreshDashboard();
+
+    setStatus("✅ Ready");
+  } catch(err){
+    console.error(err);
+    setStatus("❌ Error (open Console)");
+  }
+});
 </script>
+</body>
+</html>
