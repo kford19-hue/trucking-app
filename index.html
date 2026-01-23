@@ -255,35 +255,7 @@
       * {
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
-
-  /* ===== Loads Dropdown Styles ===== */
-  .loads-dropdown{
-    background: var(--card);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow);
-    overflow: hidden;
-    margin-top: 10px;
-  }
-
-  .loads-summary{
-    cursor: pointer;
-    padding: 12px 14px;
-    font-weight: 700;
-    color: var(--text);
-    background: var(--chip);
-    user-select: none;
-    list-style: none;
-  }
-
-  .loads-summary::-webkit-details-marker{ 
-    display:none; 
-  }
-
-  .loads-content{
-    padding: 10px;
-    max-height: 420px;
-    overflow-y: auto;
+      }
     }
   </style>
 </head>
@@ -460,15 +432,9 @@
         <input id="importFile" type="file" accept="application/json" class="hide" />
       </div>
 
-<div class="hr"></div>
-
-<details class="loads-dropdown">
-  <summary class="loads-summary">📦 Loads / Trips (tap to open)</summary>
-
-  <div class="loads-content">
-    <div class="list" id="tripList"></div>
-  </div>
-</details>
+      <div class="hr"></div>
+      <div class="list" id="tripList"></div>
+    </div>
   </section>
 
   <!-- BUDGET -->
