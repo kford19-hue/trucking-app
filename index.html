@@ -1333,6 +1333,58 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     // ---- Invoices (leave your existing invoice code as-is if you want; this patch focuses on "buttons dead") ----
+    on("btn_inv_preview","click", ()=>{
+  const id = $("inv_trip").value;
+  if(!id) return toast("Pick a trip first.");
+
+  const t = state.trips.find(x=>x.id === id);
+  if(!t) return toast("Trip not found.");
+
+  const invDate = $("inv_date").value || isoNowDate();
+  const invNum  = $("inv_number").value || ("INV-" + t.id.slice(0,8).toUpperCase());
+
+  $("invoicePreview").innerHTML = `
+    <h3 class="invH">Invoice</h3>
+    <div class="invMuted">Invoice #: ${escapeHtml(invNum)}<br>Date: ${escapeHtml(invDate)}</div>
+
+    <div class="invBlock">
+      <b>Company:</b> ${escapeHtml(t.company)}<br>
+      <b>Broker / Customer:</b> ${escapeHtml(t.customer || "-")}<br>
+      <b>Shipper:</b> ${escapeHtml(t.shipper || "-")}
+    </div>
+
+    <div class="invBlock">
+      <b>Pickup:</b><br>
+      ${escapeHtml(t.pickupAddr || t.pickup || "-")}
+    </div>
+
+    <div class="invBlock">
+      <b>Delivery:</b><br>
+      ${escapeHtml(t.deliveryAddr || t.delivery || "-")}
+    </div>
+
+    <table class="invTable">
+      <tr><th>Description</th><th class="invRight">Amount</th></tr>
+      <tr><td>Linehaul / Freight Charges</td><td class="invRight">${fmtMoney(t.revenue)}</td></tr>
+    </table>
+
+    <div class="invTotal">
+      <div class="invTotalBox">
+        <div class="invLine"><span>Subtotal</span><span>${fmtMoney(t.revenue)}</span></div>
+        <div class="invLine invBig"><span>Total Due</span><span>${fmtMoney(t.revenue)}</span></div>
+      </div>
+    </div>
+  `;
+
+  toast("Invoice preview built 🧾");
+});
+
+on("btn_inv_print","click", ()=>{
+  if(!$("invoicePreview")?.innerText.trim()){
+    return toast("Build preview first.");
+  }
+  window.print();
+});
     function loadInvoicesUI(){
       const sel = $("inv_trip");
       if(!sel) return;
