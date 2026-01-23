@@ -107,6 +107,85 @@
       font-size:13px; max-width:92vw; backdrop-filter: blur(10px);
       pointer-events:none; /* prevents it blocking taps */
     }
+
+    /* =========================
+       Invoice Preview (in-app)
+    ========================= */
+    .invoicePaper{
+      background:#ffffff;
+      color:#111;
+      border-radius:14px;
+      padding:18px;
+      border:1px solid rgba(255,255,255,.08);
+      overflow:auto;
+    }
+    .invoicePaper *{ box-sizing:border-box; }
+    .invTop{
+      display:flex;
+      justify-content:space-between;
+      gap:14px;
+      flex-wrap:wrap;
+      align-items:flex-start;
+      margin-bottom:12px;
+    }
+    .invH{
+      font-size:18px;
+      font-weight:700;
+      margin:0;
+      color:#111;
+    }
+    .invMuted{ color:#555; font-size:12px; }
+    .invBlock{
+      border:1px solid #e6e6e6;
+      border-radius:12px;
+      padding:12px;
+      margin-top:10px;
+    }
+    .invGrid2{
+      display:grid;
+      grid-template-columns:1fr;
+      gap:10px;
+    }
+    @media(min-width:640px){ .invGrid2{ grid-template-columns:1fr 1fr; } }
+    .invTable{
+      width:100%;
+      border-collapse:collapse;
+      margin-top:10px;
+      font-size:13px;
+    }
+    .invTable th, .invTable td{
+      border-bottom:1px solid #eee;
+      padding:10px 8px;
+      text-align:left;
+      vertical-align:top;
+    }
+    .invTable th{ color:#444; font-weight:700; }
+    .invRight{ text-align:right; }
+    .invTotal{
+      display:flex;
+      justify-content:flex-end;
+      margin-top:10px;
+      font-size:14px;
+    }
+    .invTotalBox{
+      min-width:260px;
+      border:1px solid #eee;
+      border-radius:12px;
+      padding:12px;
+      background:#fafafa;
+    }
+    .invLine{
+      display:flex; justify-content:space-between; gap:10px;
+      padding:4px 0;
+      font-variant-numeric: tabular-nums;
+    }
+    .invBig{
+      font-size:16px;
+      font-weight:800;
+      border-top:1px solid #eee;
+      margin-top:8px;
+      padding-top:8px;
+    }
   </style>
 </head>
 <body>
@@ -122,6 +201,7 @@
     <div class="tab active" data-tab="trips">🚛 Trips</div>
     <div class="tab" data-tab="budget">🏠 Budget</div>
     <div class="tab" data-tab="dashboard">📊 Dashboard</div>
+    <div class="tab" data-tab="invoices">🧾 Invoices</div>
     <div class="tab" data-tab="settings">⚙️ Settings</div>
   </div>
 </header>
@@ -410,6 +490,52 @@
     </div>
   </section>
 
+  <!-- INVOICES -->
+  <section id="tab-invoices" class="grid hide">
+    <div class="card">
+      <h2>Invoices</h2>
+      <div class="small">Pick a saved trip, preview the invoice, then print (or “Save as PDF”).</div>
+
+      <div class="row">
+        <label>Select Trip / Load
+          <select id="inv_trip"></select>
+        </label>
+      </div>
+
+      <div class="row two">
+        <label>Invoice Date (optional override)
+          <input id="inv_date" type="date" />
+        </label>
+        <label>Invoice # (optional override)
+          <input id="inv_number" placeholder="auto" />
+        </label>
+      </div>
+
+      <div class="btnRow">
+        <button type="button" class="primary" id="btn_inv_preview">🧾 Build Preview</button>
+        <button type="button" class="good" id="btn_inv_print">🖨️ Print / Save PDF</button>
+      </div>
+
+      <div class="hr"></div>
+      <div id="invoicePreview" class="invoicePaper">
+        <div class="invMuted">No invoice selected yet.</div>
+      </div>
+
+      <div class="hr"></div>
+      <div class="small">
+        Tip: On iPhone/Android, use the browser share/print options to save as PDF.
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>What prints</h2>
+      <div class="small">
+        The invoice pulls from your saved trip: company, broker/customer, shipper, pickup/delivery addresses, miles, revenue, and notes.
+        Want a “carrier address / remit to / payment terms” block? Add it and I’ll wire it in. Humans love extra boxes. 🙃
+      </div>
+    </div>
+  </section>
+
   <!-- SETTINGS -->
   <section id="tab-settings" class="grid hide">
     <div class="card">
@@ -619,6 +745,10 @@ function todayISO(){
   const local = new Date(d.getTime() - off*60000);
   return local.toISOString().slice(0,10);
 }
+function isoNowDate(){
+  return todayISO();
+}
+function safeStr(x){ return String(x ?? ""); }
 
 /* =========================
    Tabs
@@ -628,13 +758,16 @@ document.querySelectorAll(".tab").forEach(tab=>{
     document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
     tab.classList.add("active");
     const name = tab.dataset.tab;
-    ["trips","budget","dashboard","settings"].forEach(n=>{
+
+    ["trips","budget","dashboard","invoices","settings"].forEach(n=>{
       $("tab-"+n).classList.toggle("hide", n!==name);
     });
+
     if(name==="dashboard") refreshDashboard();
     if(name==="settings") loadSettingsUI();
     if(name==="budget") loadBudgetUI();
     if(name==="trips") renderTrips();
+    if(name==="invoices") loadInvoicesUI();
   });
 });
 
@@ -771,6 +904,9 @@ $("btn_save").addEventListener("click", ()=>{
   saveState();
   updateTripKPIs(t);
   renderTrips();
+  loadYearOptions();
+  // keep invoices list fresh
+  if(!$("tab-invoices").classList.contains("hide")) loadInvoicesUI();
   toast("Saved 💾");
 });
 
@@ -837,6 +973,8 @@ function renderTrips(){
         state.trips = state.trips.filter(x=>x.id!==t.id);
         saveState();
         renderTrips();
+        loadYearOptions();
+        if(!$("tab-invoices").classList.contains("hide")) loadInvoicesUI();
         toast("Deleted 🗑️");
       }
     });
@@ -928,6 +1066,8 @@ $("importFile").addEventListener("change", async (e)=>{
     renderTrips();
     loadSettingsUI();
     loadBudgetUI();
+    loadYearOptions();
+    if(!$("tab-invoices").classList.contains("hide")) loadInvoicesUI();
     toast("Imported ⬆️");
   } catch(err){
     toast("Import failed. Wrong file?");
@@ -981,7 +1121,8 @@ function renderBudgetList(){
       </div>
     `;
     item.querySelector("button").addEventListener("click", ()=>{
-      getBudgetMonth().splice(idx,1);
+      getBudgetMonth().splice(idx,
+1);
       saveState();
       renderBudgetList();
       calcBudget();
@@ -1139,6 +1280,201 @@ function refreshDashboard(){
 }
 
 /* =========================
+   Invoices
+========================= */
+function loadInvoicesUI(){
+  const sel = $("inv_trip");
+  if(!sel) return;
+
+  sel.innerHTML = "";
+  const base = document.createElement("option");
+  base.value = "";
+  base.textContent = state.trips.length ? "Select a saved trip…" : "No trips saved yet.";
+  sel.appendChild(base);
+
+  state.trips.slice(0,500).forEach(t=>{
+    const opt = document.createElement("option");
+    opt.value = t.id;
+    opt.textContent = `${t.date} · ${t.company} · ${t.pickup} → ${t.delivery} · $${money(t.revenue).toFixed(2)}`;
+    sel.appendChild(opt);
+  });
+
+  $("inv_date").value = $("inv_date").value || isoNowDate();
+  // default invoice number is generated when previewing
+  $("invoicePreview").innerHTML = `<div class="invMuted">Pick a trip and click “Build Preview”.</div>`;
+}
+
+function findTripById(id){
+  return state.trips.find(t=> t.id === id) || null;
+}
+
+function autoInvoiceNumber(t){
+  // deterministic-ish invoice number so it doesn't change every time:
+  // INV-YYYYMMDD-XXXX (last 4 of trip id)
+  const d = (t?.date || "").replaceAll("-","");
+  const tail = safeStr(t?.id).replaceAll("-","").slice(-4).toUpperCase();
+  return `INV-${d || "00000000"}-${tail || "0000"}`;
+}
+
+function buildInvoiceHTML(t, invDate, invNo){
+  const miles = money(t.totalMiles);
+  const rate = money(t.revenue);
+  const shipper = t.shipper || "-";
+  const customer = t.customer || "-";
+  const consignee = t.consignee || "-";
+
+  const pickupLine = `${t.pickup || "-"}${t.pickupAddr ? " · " + t.pickupAddr : ""}`;
+  const deliveryLine = `${t.delivery || "-"}${t.deliveryAddr ? " · " + t.deliveryAddr : ""}`;
+
+  // Invoice shows revenue as the amount due. (Not net.)
+  const amountDue = rate;
+
+  return `
+    <div class="invTop">
+      <div>
+        <h3 class="invH">INVOICE</h3>
+        <div class="invMuted">Invoice #: <b>${escapeHtml(invNo)}</b></div>
+        <div class="invMuted">Invoice Date: <b>${escapeHtml(invDate)}</b></div>
+        <div class="invMuted">Trip Date: <b>${escapeHtml(t.date || "-")}</b></div>
+      </div>
+      <div style="min-width:240px">
+        <div class="invMuted">Carrier / Company</div>
+        <div style="font-weight:800; font-size:14px; margin-top:4px">${escapeHtml(t.company || "-")}</div>
+        <div class="invMuted" style="margin-top:6px">Truck: <b>${escapeHtml(t.truck || "-")}</b> · Trailer: <b>${escapeHtml(t.trailer || "-")}</b></div>
+        <div class="invMuted">Load/Ref: <b>${escapeHtml(t.ref || "-")}</b></div>
+      </div>
+    </div>
+
+    <div class="invGrid2">
+      <div class="invBlock">
+        <div class="invMuted" style="font-weight:700; margin-bottom:6px">Bill To (Broker / Customer)</div>
+        <div style="font-weight:800">${escapeHtml(customer)}</div>
+        <div class="invMuted" style="margin-top:6px">Consignee: <b>${escapeHtml(consignee)}</b></div>
+      </div>
+
+      <div class="invBlock">
+        <div class="invMuted" style="font-weight:700; margin-bottom:6px">Shipper</div>
+        <div style="font-weight:800">${escapeHtml(shipper)}</div>
+        <div class="invMuted" style="margin-top:6px">Pickup: <b>${escapeHtml(pickupLine)}</b></div>
+        <div class="invMuted">Delivery: <b>${escapeHtml(deliveryLine)}</b></div>
+      </div>
+    </div>
+
+    <div class="invBlock">
+      <div class="invMuted" style="font-weight:700; margin-bottom:6px">Service Details</div>
+      <table class="invTable">
+        <thead>
+          <tr>
+            <th>Description</th>
+            <th class="invRight">Miles</th>
+            <th class="invRight">Rate</th>
+            <th class="invRight">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>
+              Linehaul: ${escapeHtml(t.pickup || "-")} → ${escapeHtml(t.delivery || "-")}
+              <div class="invMuted" style="margin-top:4px">Deadhead: ${fmtNum(t.deadheadMiles || 0)} mi · Loaded: ${fmtNum(t.loadedMiles || 0)} mi</div>
+            </td>
+            <td class="invRight mono">${fmtNum(miles)}</td>
+            <td class="invRight mono">${miles>0 ? fmtMoney(rate/miles) + "/mi" : "-"}</td>
+            <td class="invRight mono">${fmtMoney(rate)}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="invTotal">
+        <div class="invTotalBox">
+          <div class="invLine"><span>Subtotal</span><span class="mono">${fmtMoney(rate)}</span></div>
+          <div class="invLine"><span>Adjustments</span><span class="mono">${fmtMoney(0)}</span></div>
+          <div class="invLine invBig"><span>Amount Due</span><span class="mono">${fmtMoney(amountDue)}</span></div>
+        </div>
+      </div>
+    </div>
+
+    ${t.notes ? `
+      <div class="invBlock">
+        <div class="invMuted" style="font-weight:700; margin-bottom:6px">Notes</div>
+        <div style="white-space:pre-wrap">${escapeHtml(t.notes)}</div>
+      </div>
+    ` : ""}
+
+    <div class="invMuted" style="margin-top:10px">
+      This invoice was generated offline from saved trip data.
+    </div>
+  `;
+}
+
+function setInvoicePreview(){
+  const tripId = $("inv_trip").value;
+  if(!tripId) return toast("Pick a trip first.");
+  const t = findTripById(tripId);
+  if(!t) return toast("Trip not found.");
+
+  const invDate = $("inv_date").value || isoNowDate();
+
+  const suggested = autoInvoiceNumber(t);
+  const invNo = $("inv_number").value.trim() || suggested;
+  if($("inv_number").value.trim()==="") $("inv_number").value = invNo;
+
+  $("invoicePreview").innerHTML = buildInvoiceHTML(t, invDate, invNo);
+  toast("Invoice ready 🧾");
+}
+
+$("btn_inv_preview").addEventListener("click", setInvoicePreview);
+
+$("inv_trip").addEventListener("change", ()=>{
+  $("inv_number").value = "";
+  $("invoicePreview").innerHTML = `<div class="invMuted">Click “Build Preview” to generate the invoice.</div>`;
+});
+
+$("btn_inv_print").addEventListener("click", ()=>{
+  const tripId = $("inv_trip").value;
+  if(!tripId) return toast("Pick a trip first.");
+  // ensure preview exists
+  setInvoicePreview();
+
+  const html = $("invoicePreview").innerHTML;
+
+  const win = window.open("", "_blank");
+  if(!win) return toast("Popup blocked. Allow popups to print.");
+
+  // Minimal print stylesheet so the invoice prints clean
+  win.document.open();
+  win.document.write(`
+    <!doctype html>
+    <html>
+    <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width,initial-scale=1" />
+      <title>Invoice</title>
+      <style>
+        body{ margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background:#fff; }
+        .wrap{ max-width:860px; margin:0 auto; padding:18px; }
+        /* include the invoice styles */
+        ${document.querySelector("style").textContent}
+        /* but force invoice paper to full width on print */
+        .invoicePaper{ border:none; border-radius:0; padding:0; }
+        @media print{
+          .wrap{ padding:0; }
+        }
+      </style>
+    </head>
+    <body>
+      <div class="wrap">
+        <div class="invoicePaper">${html}</div>
+      </div>
+      <script>
+        window.onload = () => { setTimeout(()=> window.print(), 50); };
+      </script>
+    </body>
+    </html>
+  `);
+  win.document.close();
+});
+
+/* =========================
    Settings
 ========================= */
 function loadSettingsUI(){
@@ -1181,6 +1517,7 @@ $("btn_save_lists").addEventListener("click", ()=>{
 
   saveState();
   loadTripDropdowns();
+  if(!$("tab-invoices").classList.contains("hide")) loadInvoicesUI();
   toast("Lists saved 💾");
 });
 
@@ -1191,6 +1528,7 @@ $("btn_reset_lists").addEventListener("click", ()=>{
     loadSettingsUI();
     loadTripDropdowns();
     loadBudgetUI();
+    if(!$("tab-invoices").classList.contains("hide")) loadInvoicesUI();
     toast("Reset ↩️");
   }
 });
@@ -1223,6 +1561,7 @@ $("btn_nuke").addEventListener("click", ()=>{
     loadBudgetUI();
     renderTrips();
     refreshDashboard();
+    if(!$("tab-invoices").classList.contains("hide")) loadInvoicesUI();
     toast("All data deleted 🧨");
   }
 });
@@ -1243,7 +1582,7 @@ renderTrips();
 loadSettingsUI();
 loadBudgetUI();
 refreshDashboard();
+loadInvoicesUI();
 </script>
 </body>
 </html>
-
