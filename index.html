@@ -453,10 +453,21 @@
         <input id="importFile" type="file" accept="application/json" class="hide" />
       </div>
 
-      <div class="hr"></div>
-      <div class="list" id="tripList"></div>
-    </div>
-  </section>
+<div class="row">
+  <label>Saved Trips (dropdown)
+    <select id="tripPicker"></select>
+  </label>
+</div>
+
+<div class="btnRow">
+  <button type="button" class="primary" id="btn_load_trip">✏️ Load Selected Trip</button>
+  <button type="button" class="bad" id="btn_delete_trip">🗑️ Delete Selected Trip</button>
+</div>
+
+<div class="hr"></div>
+<div class="item" id="tripPreviewBox">
+  <div class="small">Pick a trip from the dropdown to see details here.</div>
+</div>
 
   <!-- BUDGET -->
   <section id="tab-budget" class="grid hide">
@@ -967,28 +978,44 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
 
-    function renderTrips(){
-      const q = (($("searchTrips")?.value)||"").toLowerCase().trim();
-      const list = $("tripList");
-      if(!list) return;
-      list.innerHTML = "";
+function renderTrips(){
+  const q = (($("searchTrips")?.value)||"").toLowerCase().trim();
+  const picker = $("tripPicker");
+  const preview = $("tripPreviewBox");
+  if(!picker || !preview) return;
 
-      const filtered = state.trips.filter(t=>{
-        if(!q) return true;
-        const blob = [
-          t.company,t.shipper,t.pickup,t.delivery,t.ref,t.notes,t.truck,t.trailer,
-          t.customer,t.consignee
-        ].join(" ").toLowerCase();
-        return blob.includes(q);
-      });
+  // Filter trips based on search query
+  const filtered = state.trips.filter(t=>{
+    if(!q) return true;
+    const blob = [
+      t.company,t.shipper,t.pickup,t.delivery,t.ref,t.notes,t.truck,t.trailer,
+      t.customer,t.consignee
+    ].join(" ").toLowerCase();
+    return blob.includes(q);
+  });
 
-      if(filtered.length===0){
-        const div = document.createElement("div");
-        div.className="small";
-        div.textContent = state.trips.length===0 ? "No trips saved yet." : "No matches.";
-        list.appendChild(div);
-        return;
-      }
+  // Build dropdown
+  picker.innerHTML = "";
+
+  const base = document.createElement("option");
+  base.value = "";
+  base.textContent = filtered.length
+    ? "Select a saved trip…"
+    : (state.trips.length ? "No matches." : "No trips saved yet.");
+  picker.appendChild(base);
+
+  filtered.slice(0,800).forEach(t=>{
+    const opt = document.createElement("option");
+    opt.value = t.id;
+
+    const rev = money(t.revenue).toFixed(2);
+    opt.textContent = `${t.date} · ${t.company} · ${t.pickup} → ${t.delivery} · $${rev}`;
+    picker.appendChild(opt);
+  });
+
+  // Clear preview when list changes
+  preview.innerHTML = `<div class="small">Pick a trip from the dropdown to see details here.</div>`;
+}
 
       filtered.slice(0,200).forEach(t=>{
         const item = document.createElement("div");
@@ -1716,7 +1743,70 @@ function printInvoice(){
     on("btn_save","click", ()=> saveTrip());
     on("btn_clear","click", ()=> { clearTripForm(); toast("Cleared"); });
 
-    on("searchTrips","input", ()=> renderTrips());
+on("searchTrips","input", renderTrips);
+
+on("tripPicker","change", ()=>{
+  const id = $("tripPicker").value;
+  const preview = $("tripPreviewBox");
+  if(!preview) return;
+
+  if(!id){
+    preview.innerHTML = `<div class="small">Pick a trip from the dropdown to see details here.</div>`;
+    return;
+  }
+
+  const t = state.trips.find(x=>x.id === id);
+  if(!t){
+    preview.innerHTML = `<div class="small">Trip not found.</div>`;
+    return;
+  }
+
+  preview.innerHTML = `
+    <div class="itemTop">
+      <div>
+        <div class="itemTitle"><b>${escapeHtml(t.company)}</b> · ${escapeHtml(t.pickup)} → ${escapeHtml(t.delivery)}</div>
+        <div class="itemMeta mono">${escapeHtml(t.date)} · Truck ${escapeHtml(t.truck)} · Trailer ${escapeHtml(t.trailer)} · Ref: ${escapeHtml(t.ref||"-")}</div>
+        <div class="itemMeta">Broker: <b>${escapeHtml(t.customer||"-")}</b> · Consignee: <b>${escapeHtml(t.consignee||"-")}</b></div>
+      </div>
+      <div class="mono" style="font-size:14px; color:${(t.totals?.net||0)>=0?'var(--good)':'var(--bad)'}">
+        ${fmtMoney(money(t.totals?.net))}
+      </div>
+    </div>
+
+    <div class="itemNums mono" style="margin-top:10px">
+      <span>Miles: <b>${fmtNum(money(t.totalMiles))}</b> (DH ${fmtNum(money(t.deadheadMiles))})</span>
+      <span>Rev: <b>${fmtMoney(money(t.revenue))}</b></span>
+      <span>Exp: <b>${fmtMoney(money(t.totals?.totalExpenses))}</b></span>
+      <span>MPG: <b>${(money(t.totals?.mpg) || 0).toFixed(2)}</b></span>
+    </div>
+
+    ${t.notes ? `<div class="small" style="margin-top:10px">📝 ${escapeHtml(t.notes)}</div>` : ``}
+  `;
+});
+
+on("btn_load_trip","click", ()=>{
+  const id = $("tripPicker")?.value;
+  if(!id) return toast("Pick a trip first.");
+  const t = state.trips.find(x=>x.id === id);
+  if(!t) return toast("Trip not found.");
+  loadTripToForm(t);
+});
+
+on("btn_delete_trip","click", ()=>{
+  const id = $("tripPicker")?.value;
+  if(!id) return toast("Pick a trip first.");
+  const t = state.trips.find(x=>x.id === id);
+  if(!t) return toast("Trip not found.");
+
+  if(confirm("Delete this trip?")){
+    state.trips = state.trips.filter(x=>x.id !== id);
+    saveState();
+    renderTrips();
+    loadYearOptions();
+    if(!$("tab-invoices")?.classList.contains("hide")) loadInvoicesUI();
+    toast("Deleted 🗑️");
+  }
+});
 
     on("btn_export","click", ()=> exportData());
     on("btn_import","click", ()=> $("importFile")?.click());
