@@ -284,6 +284,49 @@
     padding: 10px;
     max-height: 420px;
     overflow-y: auto;
+
+    /* ===== Invoice / Print Styles ===== */
+@media print {
+  body { background: white !important; }
+}
+
+.invoice {
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+  color: #111;
+  padding: 24px;
+}
+.invoice h1 { margin: 0 0 6px 0; font-size: 22px; }
+.invoice .muted { color: #555; font-size: 12px; }
+.invoice .row { display: flex; gap: 16px; margin-top: 14px; }
+.invoice .card {
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  padding: 12px;
+  flex: 1;
+}
+.invoice table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+}
+.invoice th, .invoice td {
+  border: 1px solid #ddd;
+  padding: 8px;
+  font-size: 12px;
+  vertical-align: top;
+}
+.invoice th {
+  background: #f5f5f5;
+  text-align: left;
+}
+.invoice .totals {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+.invoice .totals .card {
+  max-width: 320px;
+}
     }
   </style>
 </head>
@@ -1703,6 +1746,148 @@ document.addEventListener("DOMContentLoaded", () => {
     setStatus("❌ Error (open Console)");
   }
 });
+// ===== Invoice / Print Helpers =====
+function esc(v){
+  return (v ?? "").toString()
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#039;");
+}
+
+function money(n){
+  const x = Number(n);
+  if (!isFinite(x)) return "$0.00";
+  return x.toLocaleString(undefined, { style:"currency", currency:"USD" });
+}
+
+function buildInvoiceHTML(trip){
+  const invoiceNo = trip.invoiceNo || trip.invoice || trip.invoiceNumber || "";
+  const tripNo    = trip.tripNo || trip.tripNumber || trip.trip || "";
+  const date      = trip.date || trip.pickupDate || trip.createdAt || "";
+  const company   = trip.company || trip.companyName || "";
+  const driver    = trip.driver || trip.driverName || "";
+  const truck     = trip.truck || trip.truckNo || "";
+  const trailer   = trip.trailer || trip.trailerNo || "";
+  const tireSize  = trip.tireSize || "";
+
+  const broker    = trip.broker || trip.brokerName || "";
+  const shipper   = trip.shipper || "";
+  const pickup    = trip.pickupAddress || trip.shipperAddress || trip.pickup || "";
+  const consignee = trip.consignee || trip.delivery || "";
+  const dropoff   = trip.deliveryAddress || trip.consigneeAddress || trip.dropoff || "";
+
+  const loadedMiles   = trip.loadedMiles ?? trip.milesLoaded ?? "";
+  const deadheadMiles = trip.deadheadMiles ?? trip.milesDeadhead ?? "";
+  const totalMiles    = trip.totalMiles ?? trip.milesTotal ?? "";
+
+  const gross     = trip.gross ?? trip.revenue ?? trip.rate ?? 0;
+  const totalExp  = trip.totalExpenses ?? trip.expensesTotal ?? 0;
+  const net       = trip.net ?? trip.netAfterTrip ?? (Number(gross) - Number(totalExp));
+
+  const bolLink   = trip.bolLink || trip.bol || "";
+
+  return `
+    <div class="invoice">
+      <h1>Invoice ${esc(invoiceNo || "(no #)")}</h1>
+      <div class="muted">
+        Trip #: ${esc(tripNo)} • Date: ${esc(date)}<br>
+        Company: ${esc(company)} • Driver: ${esc(driver)}
+      </div>
+
+      <div class="row">
+        <div class="card">
+          <strong>Equipment</strong><br>
+          Truck: ${esc(truck)}<br>
+          Trailer: ${esc(trailer)}<br>
+          Tire size: ${esc(tireSize)}
+        </div>
+        <div class="card">
+          <strong>Broker</strong><br>
+          Broker: ${esc(broker)}
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="card">
+          <strong>Pickup</strong><br>
+          Shipper: ${esc(shipper)}<br>
+          Address: ${esc(pickup)}
+        </div>
+        <div class="card">
+          <strong>Delivery</strong><br>
+          Consignee: ${esc(consignee)}<br>
+          Address: ${esc(dropoff)}
+        </div>
+      </div>
+
+      <table>
+        <tr>
+          <th>Miles</th>
+          <th>Documents</th>
+        </tr>
+        <tr>
+          <td>
+            Loaded: ${esc(loadedMiles)}<br>
+            Deadhead: ${esc(deadheadMiles)}<br>
+            Total: ${esc(totalMiles)}
+          </td>
+          <td>
+            ${bolLink ? `BOL/Docs: ${esc(bolLink)}` : "No document link"}
+          </td>
+        </tr>
+      </table>
+
+      <div class="totals">
+        <div class="card">
+          <div><strong>Gross:</strong> ${money(gross)}</div>
+          <div><strong>Total expenses:</strong> ${money(totalExp)}</div>
+          <div><strong>Net:</strong> ${money(net)}</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function printInvoiceForTrip(trip){
+  const html = buildInvoiceHTML(trip);
+
+  const w = window.open("", "_blank", "noopener,noreferrer,width=900,height=700");
+  if (!w) { 
+    alert("Pop-up blocked. Allow pop-ups to print invoices."); 
+    return; 
+  }
+
+  const css = [...document.querySelectorAll("style")]
+    .map(s => s.innerHTML).join("\n");
+
+  w.document.open();
+  w.document.write(`
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Invoice</title>
+        <style>${css}</style>
+      </head>
+      <body>
+        ${html}
+        <script>
+          window.onload = function(){
+            window.focus();
+            window.print();
+          };
+        <\/script>
+      </body>
+    </html>
+  `);
+  w.document.close();
+}
+
 </script>
+<!-- Hidden invoice mount (doesn't change layout) -->
+<div id="invoiceMount" style="display:none;"></div>
 </body>
 </html>
