@@ -188,103 +188,109 @@
       padding-top:8px;
     }
 
-    /* =========================
-       PRINT: invoice-only output
-    ========================= */
-    @media print {
-      @page { margin: 14mm; }
+/* =========================
+   PRINT: invoice-only output
+========================= */
+@media print {
+  @page { margin: 14mm; }
 
-      html, body {
-        background:#fff !important;
-        color:#111 !important;
-        height:auto !important;
-      }
-
-      /* Hide the entire app UI */
-      header, main, #toast {
-        display:none !important;
-      }
-
-      /* ONLY show the invoice preview area */
-      #invoicePreview {
-        display:block !important;
-        position: static !important;
-        width: 100% !important;
-        margin: 0 !important;
-        padding: 0 !important;
-
-        border: none !important;
-        border-radius: 0 !important;
-        box-shadow: none !important;
-
-        background: #fff !important;
-        color:#111 !important;
-        overflow: visible !important;
-      }
-
-      /* Remove the in-app preview padding so it prints flush */
-      .invoicePaper{
-        border:none !important;
-        border-radius:0 !important;
-        box-shadow:none !important;
-        padding:0 !important;
-        margin:0 !important;
-        background:#fff !important;
-        overflow: visible !important;
-      }
-
-      /* Avoid splitting key blocks */
-      .invTop, .invBlock, .invTotal, .invTotalBox {
-        break-inside: avoid;
-        page-break-inside: avoid;
-      }
-
-      /* Tables: let them flow across pages cleanly */
-      table { width:100% !important; border-collapse:collapse !important; }
-      thead { display: table-header-group; }
-      tfoot { display: table-footer-group; }
-      tr, td, th {
-        break-inside: avoid;
-        page-break-inside: avoid;
-      }
-
-      /* Don’t clip content */
-      * { overflow: visible !important; }
-
-      /* Keep colors (Chrome sometimes fades them) */
-      * {
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
-
-  /* ===== Loads Dropdown Styles ===== */
-  .loads-dropdown{
-    background: var(--card);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow);
-    overflow: hidden;
-    margin-top: 10px;
+  html, body {
+    background:#fff !important;
+    color:#111 !important;
+    height:auto !important;
   }
 
-  .loads-summary{
-    cursor: pointer;
-    padding: 12px 14px;
-    font-weight: 700;
-    color: var(--text);
-    background: var(--chip);
-    user-select: none;
-    list-style: none;
+  /* Hide everything by default (because main contains the invoice) */
+  body * {
+    visibility: hidden !important;
   }
 
-  .loads-summary::-webkit-details-marker{ 
-    display:none; 
+  /* ONLY show invoice preview */
+  #invoicePreview,
+  #invoicePreview * {
+    visibility: visible !important;
   }
 
-  .loads-content{
-    padding: 10px;
-    max-height: 420px;
-    overflow-y: auto;
-    }
+  /* Put the invoice at the top-left of the printed page */
+  #invoicePreview {
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+
+    background: #fff !important;
+    color:#111 !important;
+    overflow: visible !important;
+  }
+
+  /* Remove the in-app preview padding so it prints flush */
+  .invoicePaper{
+    border:none !important;
+    border-radius:0 !important;
+    box-shadow:none !important;
+    padding:0 !important;
+    margin:0 !important;
+    background:#fff !important;
+    overflow: visible !important;
+  }
+
+  /* Avoid splitting key blocks */
+  .invTop, .invBlock, .invTotal, .invTotalBox {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Tables: let them flow across pages cleanly */
+  table { width:100% !important; border-collapse:collapse !important; }
+  thead { display: table-header-group; }
+  tfoot { display: table-footer-group; }
+  tr, td, th {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Keep colors (Chrome sometimes fades them) */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+
+/* ===== Loads Dropdown Styles ===== */
+.loads-dropdown{
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  margin-top: 10px;
+}
+
+.loads-summary{
+  cursor: pointer;
+  padding: 12px 14px;
+  font-weight: 700;
+  color: var(--text);
+  background: var(--chip);
+  user-select: none;
+  list-style: none;
+}
+
+.loads-summary::-webkit-details-marker{
+  display:none;
+}
+
+.loads-content{
+  padding: 10px;
+  max-height: 420px;
+  overflow-y: auto;
+}
   </style>
 </head>
 
