@@ -1540,79 +1540,183 @@ document.addEventListener("DOMContentLoaded", () => {
       return `INV-${d}-${seq}`;
     }
 
-    function buildInvoiceHTML(trip, invDate, invNo){
-      const safe = escapeHtml;
-      const items = [
-        { label: "Loaded miles", val: fmtNum(trip.loadedMiles) },
-        { label: "Deadhead miles", val: fmtNum(trip.deadheadMiles) },
-        { label: "Total miles", val: fmtNum(trip.totalMiles) }
-      ];
+function buildInvoiceHTML(trip, invDate, invNo){
+  const safe = escapeHtml;
 
-      return `
-        <div class="invTop">
-          <div>
-            <div class="invH">INVOICE</div>
-            <div class="invMuted">Invoice #: <b>${safe(invNo)}</b></div>
-            <div class="invMuted">Invoice Date: <b>${safe(invDate)}</b></div>
-          </div>
-          <div style="text-align:right">
-            <div class="invMuted">Company</div>
-            <div style="font-size:14px;font-weight:700">${safe(trip.company)}</div>
-            <div class="invMuted">Truck ${safe(trip.truck)} · Trailer ${safe(trip.trailer)}</div>
-          </div>
+  // Helpers
+  const show = (v)=> (v===undefined || v===null || String(v).trim()==="") ? "—" : safe(v);
+  const showMoney = (n)=> fmtMoney(money(n));
+  const showNum = (n)=> fmtNum(money(n));
+
+  const res = trip.reserves || {};
+  const totals = trip.totals || {};
+
+  // Build a full “everything” details list
+  const detailsLeft = [
+    ["Trip Date", trip.date],
+    ["Invoice Date", invDate],
+    ["Invoice #", invNo],
+    ["Trip ID", trip.id],
+    ["Company", trip.company],
+    ["Broker/Customer", trip.customer],
+    ["Shipper", trip.shipper],
+    ["Consignee", trip.consignee],
+    ["Load / Reference #", trip.ref],
+  ];
+
+  const detailsRight = [
+    ["Truck #", trip.truck],
+    ["Trailer #", trip.trailer],
+    ["Tire Size", trip.tireSize],
+    ["Pickup (City/State)", trip.pickup],
+    ["Pickup Address", trip.pickupAddr],
+    ["Delivery (City/State)", trip.delivery],
+    ["Delivery Address", trip.deliveryAddr],
+  ];
+
+  const milesDetails = [
+    ["Loaded Miles", showNum(trip.loadedMiles)],
+    ["Deadhead Miles", showNum(trip.deadheadMiles)],
+    ["Total Miles", showNum(trip.totalMiles)],
+    ["MPG (est)", (money(totals.mpg) || 0).toFixed(2)],
+  ];
+
+  const fuelCost = money(trip.fuelCost);
+  const tolls = money(trip.tolls);
+  const other = money(trip.other);
+
+  const reserves = [
+    ["Tire Reserve", showMoney(res.tires)],
+    ["Maintenance Reserve", showMoney(res.maint)],
+    ["Plates Reserve", showMoney(res.plates)],
+    ["IFTA Reserve (est)", showMoney(res.ifta)],
+    ["Tax Reserve (est)", showMoney(res.tax)],
+  ];
+
+  const totalExpenses = money(totals.totalExpenses);
+  const net = money(totals.net);
+
+  // A “line item” table that actually reflects all stored cost components
+  const lineItems = [
+    { desc: "Freight Charge (Revenue)", amt: money(trip.revenue), kind: "rev" },
+    { desc: "Fuel Cost", amt: fuelCost, kind: "exp" },
+    { desc: "Tolls", amt: tolls, kind: "exp" },
+    { desc: "Other Trip Expenses", amt: other, kind: "exp" },
+    { desc: "Reserve: Tires", amt: money(res.tires), kind: "exp" },
+    { desc: "Reserve: Maintenance", amt: money(res.maint), kind: "exp" },
+    { desc: "Reserve: Plates", amt: money(res.plates), kind: "exp" },
+    { desc: "Reserve: IFTA (est)", amt: money(res.ifta), kind: "exp" },
+    { desc: "Reserve: Tax (est)", amt: money(res.tax), kind: "exp" },
+  ];
+
+  // Optional: filter out $0 lines so invoice is readable
+  const filteredItems = lineItems.filter(x => Math.abs(money(x.amt)) > 0.000001 || x.kind === "rev");
+
+  return `
+    <div class="invTop">
+      <div>
+        <div class="invH">INVOICE</div>
+        <div class="invMuted">Invoice #: <b>${safe(invNo)}</b></div>
+        <div class="invMuted">Invoice Date: <b>${safe(invDate)}</b></div>
+        <div class="invMuted">Trip Date: <b>${safe(trip.date || invDate)}</b></div>
+      </div>
+      <div style="text-align:right">
+        <div class="invMuted">Company</div>
+        <div style="font-size:14px;font-weight:700">${show(trip.company)}</div>
+        <div class="invMuted">Truck ${show(trip.truck)} · Trailer ${show(trip.trailer)}</div>
+        <div class="invMuted">Tire Size: <b>${show(trip.tireSize)}</b></div>
+      </div>
+    </div>
+
+    <div class="invGrid2">
+      <div class="invBlock">
+        <div style="font-weight:800;margin-bottom:8px">Trip + Parties</div>
+        ${detailsLeft.map(([k,v])=>`
+          <div class="invMuted">${safe(k)}: <b>${show(v)}</b></div>
+        `).join("")}
+      </div>
+
+      <div class="invBlock">
+        <div style="font-weight:800;margin-bottom:8px">Equipment + Route</div>
+        ${detailsRight.map(([k,v])=>`
+          <div class="invMuted">${safe(k)}: <b>${show(v)}</b></div>
+        `).join("")}
+      </div>
+    </div>
+
+    <div class="invGrid2">
+      <div class="invBlock">
+        <div style="font-weight:800;margin-bottom:8px">Miles + Performance</div>
+        ${milesDetails.map(([k,v])=>`
+          <div class="invMuted">${safe(k)}: <b class="mono">${safe(String(v))}</b></div>
+        `).join("")}
+      </div>
+
+      <div class="invBlock">
+        <div style="font-weight:800;margin-bottom:8px">Fuel + Inputs</div>
+        <div class="invMuted">Fuel Gallons Purchased: <b class="mono">${showNum(trip.fuelGallons)}</b></div>
+        <div class="invMuted">Avg Fuel Cost/Gallon: <b class="mono">${showMoney(trip.fuelCostPerGallon)}</b></div>
+        <div class="invMuted">Fuel Cost: <b class="mono">${showMoney(trip.fuelCost)}</b></div>
+        <div class="invMuted">Tolls: <b class="mono">${showMoney(trip.tolls)}</b></div>
+        <div class="invMuted">Other Trip Expenses: <b class="mono">${showMoney(trip.other)}</b></div>
+      </div>
+    </div>
+
+    <div class="invBlock">
+      <div style="font-weight:800;margin-bottom:8px">Reserves Breakdown</div>
+      <div class="invGrid2">
+        <div>
+          ${reserves.slice(0,3).map(([k,v])=>`
+            <div class="invMuted">${safe(k)}: <b class="mono">${safe(String(v))}</b></div>
+          `).join("")}
         </div>
-
-        <div class="invGrid2">
-          <div class="invBlock">
-            <div style="font-weight:800;margin-bottom:6px">Load Info</div>
-            <div class="invMuted">Shipper: <b>${safe(trip.shipper)}</b></div>
-            <div class="invMuted">Broker/Customer: <b>${safe(trip.customer)}</b></div>
-            <div class="invMuted">Consignee: <b>${safe(trip.consignee)}</b></div>
-            ${trip.ref ? `<div class="invMuted">Reference: <b>${safe(trip.ref)}</b></div>` : ""}
-            ${trip.notes ? `<div class="invMuted">Notes: <b>${safe(trip.notes)}</b></div>` : ""}
-          </div>
-
-          <div class="invBlock">
-            <div style="font-weight:800;margin-bottom:6px">Route</div>
-            <div class="invMuted">Pickup: <b>${safe(trip.pickup)}</b></div>
-            ${trip.pickupAddr ? `<div class="invMuted">${safe(trip.pickupAddr)}</div>` : ""}
-            <div class="invMuted" style="margin-top:8px">Delivery: <b>${safe(trip.delivery)}</b></div>
-            ${trip.deliveryAddr ? `<div class="invMuted">${safe(trip.deliveryAddr)}</div>` : ""}
-          </div>
+        <div>
+          ${reserves.slice(3).map(([k,v])=>`
+            <div class="invMuted">${safe(k)}: <b class="mono">${safe(String(v))}</b></div>
+          `).join("")}
         </div>
+      </div>
+      <div class="invMuted" style="margin-top:8px">
+        (Reserves are estimates/allocations for your records unless you bill them separately.)
+      </div>
+    </div>
 
-        <table class="invTable">
-          <thead>
-            <tr>
-              <th>Description</th>
-              <th class="invRight">Amount</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Freight Charge</td>
-              <td class="invRight mono"><b>${fmtMoney(trip.revenue)}</b></td>
-            </tr>
-          </tbody>
-        </table>
+    <table class="invTable">
+      <thead>
+        <tr>
+          <th>Description</th>
+          <th class="invRight">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${filteredItems.map(x=>`
+          <tr>
+            <td>${safe(x.desc)}</td>
+            <td class="invRight mono">${x.kind==="rev" ? `<b>${showMoney(x.amt)}</b>` : `-${showMoney(x.amt)}`}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
 
-        <div class="invTotal">
-          <div class="invTotalBox">
-            <div class="invLine"><span>Subtotal</span><span class="mono">${fmtMoney(trip.revenue)}</span></div>
-            <div class="invLine invBig"><span>Total Due</span><span class="mono">${fmtMoney(trip.revenue)}</span></div>
-          </div>
-        </div>
+    <div class="invTotal">
+      <div class="invTotalBox">
+        <div class="invLine"><span>Revenue</span><span class="mono">${showMoney(trip.revenue)}</span></div>
+        <div class="invLine"><span>Total Expenses (incl. reserves)</span><span class="mono">-${showMoney(totalExpenses)}</span></div>
+        <div class="invLine invBig"><span>Net (for your records)</span><span class="mono">${showMoney(net)}</span></div>
+        <div class="invLine invBig"><span>Total Due</span><span class="mono">${showMoney(trip.revenue)}</span></div>
+      </div>
+    </div>
 
-        <div class="invBlock" style="margin-top:12px">
-          <div style="font-weight:800;margin-bottom:6px">Trip Stats (for your records)</div>
-          ${items.map(x=>`<div class="invMuted">${safe(x.label)}: <b class="mono">${safe(x.val)}</b></div>`).join("")}
-        </div>
+    <div class="invBlock" style="margin-top:12px">
+      <div style="font-weight:800;margin-bottom:8px">Notes</div>
+      <div class="invMuted">${show(trip.notes)}</div>
+    </div>
 
-        <div class="invMuted" style="margin-top:12px">
-          Thank you for your business.
-        </div>
-      `;
-    }
+    <div class="invMuted" style="margin-top:12px">
+      Thank you for your business.
+    </div>
+  `;
+}
 
     function buildInvoicePreview(){
       const id = $("inv_trip")?.value;
